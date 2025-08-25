@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>로그인 - SKFC 세션 관리 웹</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-box">
+            <div class="logo"><h1>SKFC</h1><div class="logo-text"><span>세션 관리</span><span>웹페이지</span></div></div>
+            
+            {% with messages = get_flashed_messages() %}
+              {% if messages %}
+                <div class="flash-error">{{ messages[0] }}</div>
+              {% endif %}
+            {% endwith %}
+
+            <form method="post">
+                <input type="text" name="user_id" placeholder="아이디" required>
+                <input type="password" name="password" placeholder="비밀번호" required>
+                <button type="submit" class="btn-primary">로그인</button>
+            </form>
+            <a href="{{ url_for('signup') }}" class="btn-secondary">회원가입</a>
+        </div>
+    </div>
+</body>
+</html>
