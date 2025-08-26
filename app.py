@@ -2,7 +2,7 @@ import time
 import io
 import qrcode
 import json
-import os # 'os' 모듈 필수
+import os
 from datetime import datetime
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -11,16 +11,10 @@ from openpyxl import Workbook
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
 
-# --- [중요] Render Disk 데이터 파일 경로 정의 ---
+# --- Render Disk 데이터 파일 경로 정의 ---
 DISK_PATH = '/var/data'
-# 로컬 환경 테스트를 위해 폴더가 없으면 자동으로 생성하는 코드
 if not os.path.exists(DISK_PATH):
-    try:
-        os.makedirs(DISK_PATH)
-    except OSError as e:
-        # Render 환경에서는 이 경로가 자동으로 마운트되므로 오류가 나지 않아야 합니다.
-        print(f"Error creating directory {DISK_PATH}: {e}")
-
+    os.makedirs(DISK_PATH)
 
 ATTENDEES_TODAY = []
 ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
@@ -32,21 +26,22 @@ CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입�
 FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 2, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
 
-# --- 파일 관리 함수 ---
+# --- 파일 관리 함수 (수정된 부분) ---
 def load_json_file(filename):
     try:
+        # 파일이 비어있을 경우 json.load가 에러를 일으키므로 먼저 확인
+        if os.path.getsize(filename) == 0:
+            return {}
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # 파일이 없거나 비어있을 경우, users.json은 dict, 나머지는 list 반환
-        return {} if 'users' in filename else []
+        # users.json과 attendance_log.json 모두 루트가 딕셔너리이므로
+        # 파일이 없거나 JSON 형식이 아닐 경우, 빈 딕셔너리를 반환합니다.
+        return {}
 
 def save_json_file(data, filename):
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving file {filename}: {e}")
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 
 # 헬퍼 함수들
@@ -147,11 +142,12 @@ def start_attendance():
     global ATTENDEES_TODAY
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
-    raw_list = log.get(today_str, [])
+    raw_list = log.get(today_str, []) # 이제 log는 항상 딕셔너리이므로 .get() 사용 가능
     sanitized_list = [item for item in raw_list if isinstance(item, dict) and 'name' in item and 'type' in item]
     ATTENDEES_TODAY = sanitized_list
     check_in_url = url_for('check_in_page', _external=True)
     return jsonify({'status': 'attendance started', 'check_in_url': check_in_url})
+
 @app.route('/qrcode')
 def qr_code():
     url = request.args.get('url')
@@ -161,30 +157,48 @@ def qr_code():
     img = qr.make_image(fill_color="black", back_color="white")
     buf = io.BytesIO(); img.save(buf); buf.seek(0)
     return send_file(buf, mimetype='image/png')
+
 @app.route('/check_in')
 def check_in_page(): return render_template('check_in.html')
+
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
     global ATTENDEES_TODAY
     name = request.form.get('name', '').strip(); member_type = request.form.get('member_type', '기타')
     if name and member_type:
         new_attendee = {'name': name, 'type': member_type}
-        if not any(a['name'] == name for a in ATTENDEES_TODAY): ATTENDEES_TODAY.append(new_attendee)
-        today_str = datetime.now().strftime('%Y-%m-%d'); log = load_json_file(ATTENDANCE_FILE)
-        if today_str not in log: log[today_str] = []
-        if not any(a['name'] == name for a in log[today_str]): log[today_str].append(new_attendee)
+        
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        log = load_json_file(ATTENDANCE_FILE)
+        
+        # 오늘 날짜의 출석 기록이 없으면 새로 생성
+        if today_str not in log:
+            log[today_str] = []
+            
+        # 중복 출석 방지
+        if not any(a['name'] == name for a in log[today_str]):
+            log[today_str].append(new_attendee)
+            if not any(a['name'] == name for a in ATTENDEES_TODAY):
+                ATTENDEES_TODAY.append(new_attendee)
+
         save_json_file(log, ATTENDANCE_FILE)
+        
     return "<h1>출석이 완료되었습니다.</h1><p>이 창을 닫아주세요.</p>"
+
 @app.route('/get_attendees')
 def get_attendees(): global ATTENDEES_TODAY; return jsonify({'attendees': ATTENDEES_TODAY})
+
 @app.route('/start_history', methods=['POST'])
 def start_history(): return jsonify({'status': 'history started'})
+
 @app.route('/get_history_by_date')
 def get_history_by_date():
     date_str = request.args.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
-    log = load_json_file(ATTENDANCE_FILE); attendees = log.get(date_str, [])
+    log = load_json_file(ATTENDANCE_FILE)
+    attendees = log.get(date_str, []) # 이제 log는 항상 딕셔너리이므로 .get() 사용 가능
     return jsonify({'attendees': attendees})
+
 @app.route('/reset_attendance_by_date', methods=['POST'])
 def reset_attendance_by_date():
     date_str = request.json.get('date')
@@ -196,27 +210,33 @@ def reset_attendance_by_date():
     if date_str == datetime.now().strftime('%Y-%m-%d'):
         global ATTENDEES_TODAY; ATTENDEES_TODAY = []
     return jsonify({'status': f'{date_str} attendance reset'})
+
 @app.route('/export_excel')
 def export_excel():
     date_str = request.args.get('date')
     if not date_str: return "Date not provided", 400
-    log = load_json_file(ATTENDANCE_FILE); attendees = log.get(date_str, [])
+    log = load_json_file(ATTENDANCE_FILE)
+    attendees = log.get(date_str, [])
     wb = Workbook(); ws = wb.active; ws.title = date_str; ws.append(['이름', '부원 구분'])
     for attendee in attendees: ws.append([attendee.get('name', ''), attendee.get('type', '')])
     excel_buffer = io.BytesIO(); wb.save(excel_buffer); excel_buffer.seek(0)
     return send_file(excel_buffer, as_attachment=True, download_name=f'attendance_{date_str}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
 @app.route('/start_ceda_timer', methods=['POST'])
 def start_ceda_timer():
     session['mode'] = 'ceda'; session['step'] = 0; setup_step()
     return jsonify({'status': 'CEDA timer initialized'})
+
 @app.route('/start_free_timer', methods=['POST'])
 def start_free_timer():
     session['mode'] = 'free_debate'; session['step'] = 0; setup_step()
     return jsonify({'status': 'Free debate timer initialized'})
+
 @app.route('/start_general_timer', methods=['POST'])
 def start_general_timer():
     session['mode'] = 'general'; session['step'] = 0; setup_step()
     return jsonify({'status': 'General timer initialized'})
+
 @app.route('/set_custom_time', methods=['POST'])
 def set_custom_time():
     if session.get('mode') != 'general': return jsonify({'status': 'invalid mode'}), 400
@@ -225,6 +245,7 @@ def set_custom_time():
     session['step'] = len(GENERAL_TIMER_DATA['names']) - 1
     session['timer_state'] = { 'runtime': minutes * 60 + seconds, 'timestamp': [] }
     return jsonify({'status': 'custom time set'})
+
 @app.route('/toggle_timer', methods=['POST'])
 def toggle_timer():
     data = get_current_data()
@@ -247,20 +268,24 @@ def toggle_timer():
         state['timestamp'] = timestamp
     session['timer_state'] = state
     return jsonify({'status': 'toggled'})
+
 @app.route('/switch_turn', methods=['POST'])
 def switch_turn():
     state = session.get('timer_state', {}); state = perform_turn_switch(state); session['timer_state'] = state
     return jsonify({'status': 'turn switched'})
+
 @app.route('/next_step', methods=['POST'])
 def next_step():
     data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
     session['step'] = min(session.get('step', 0) + 1, len(data['names']) - 1); setup_step()
     return jsonify({'status': 'next step'})
+
 @app.route('/previous_step', methods=['POST'])
 def previous_step():
     session['step'] = max(session.get('step', 0) - 1, 0); setup_step()
     return jsonify({'status': 'previous step'})
+
 @app.route('/set_step', methods=['POST'])
 def set_step():
     data = get_current_data()
@@ -271,6 +296,7 @@ def set_step():
         session['step'] = new_step; setup_step()
         return jsonify({'status': f'step set to {new_step}'})
     return jsonify({'status': 'invalid step'}), 400
+
 @app.route('/adjust_time', methods=['POST'])
 def adjust_time():
     data = get_current_data()
@@ -298,6 +324,7 @@ def adjust_time():
         else: state['timestamp'] = [time.time() - new_elapse, time.time()]
     session['timer_state'] = state
     return jsonify({'status': 'time adjusted'})
+
 @app.route('/status')
 def status():
     mode = session.get('mode')
@@ -319,6 +346,7 @@ def status():
         remain_sec = get_remain_time(runtime_sec, timestamp)
         response.update({'type': 'sequence', 'remain_sec': remain_sec, 'time_str': formalize(remain_sec), 'runtime': runtime_sec, 'is_running': is_running(timestamp), 'is_finished': remain_sec == 0})
     return jsonify(response)
+
 def setup_step():
     data = get_current_data()
     if not data: return
@@ -327,5 +355,4 @@ def setup_step():
     else: session['timer_state'] = { 'runtime': runtime_sec, 'timestamp': [] }
 
 if __name__ == '__main__':
-    # 이 부분은 Render에서 사용되지 않으며, 로컬 테스트 시에만 실행됩니다.
     app.run(debug=True, host='0.0.0.0', port=5001)
