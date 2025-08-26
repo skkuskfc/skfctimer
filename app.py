@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
+from openpyxl import Workbook
 
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
@@ -71,6 +72,8 @@ def login():
         if user_data and check_password_hash(user_data['password_hash'], password):
             session['user_id'] = user_id
             session['user_name'] = user_data['name']
+            # 새로 추가된 정보도 세션에 저장
+            session['member_type'] = user_data.get('member_type', '정보 없음')
             return redirect(url_for('index'))
         else:
             flash('아이디 또는 비밀번호가 올바르지 않습니다.')
@@ -85,6 +88,9 @@ def signup():
         password = request.form['password']
         password_confirm = request.form['password_confirm']
         unique_code = request.form['unique_code']
+        # 새로운 필드 정보 추가
+        cohort = request.form['cohort']
+        member_type = request.form['member_type']
         
         users = load_json_file(USERS_FILE)
 
@@ -96,7 +102,13 @@ def signup():
             flash('고유코드가 올바르지 않습니다.')
         else:
             hashed_password = generate_password_hash(password)
-            users[user_id] = {'name': name, 'password_hash': hashed_password}
+            # 새로운 필드 정보를 포함하여 사용자 데이터 저장
+            users[user_id] = {
+                'name': name,
+                'password_hash': hashed_password,
+                'cohort': cohort,
+                'member_type': member_type
+            }
             save_json_file(users, USERS_FILE)
             flash('회원가입이 완료되었습니다. 로그인해주세요.')
             return redirect(url_for('login'))

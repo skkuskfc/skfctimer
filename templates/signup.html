@@ -23,6 +23,18 @@
                 <input type="text" name="user_id" placeholder="아이디" required>
                 <input type="password" name="password" placeholder="비밀번호" required>
                 <input type="password" name="password_confirm" placeholder="비밀번호 확인" required>
+                <input type="number" name="cohort" placeholder="예시: 41기" required>
+                <select name="member_type" required>
+                    <option value="" disabled selected>구분 선택</option>
+                    <option value="회장">회장</option>
+                    <option value="부회장">부회장</option>
+                    <option value="세션부장">세션부장</option>
+                    <option value="총무부장">총무부장</option>
+                    <option value="홍보부장">홍보부장</option>
+                    <option value="ER부장">ER부장</option>
+                    <option value="HR부장">HR부장</option>
+                    <option value="액팅/연구팀">액팅/연구팀</option>
+                </select>
                 <input type="text" name="unique_code" placeholder="고유코드" required>
                 <button type="submit" class="btn-primary">가입하기</button>
             </form>
