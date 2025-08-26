@@ -2,6 +2,7 @@ import time
 import io
 import qrcode
 import json
+import os # 'os' 모듈 추가
 from datetime import datetime
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -10,14 +11,20 @@ from openpyxl import Workbook
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
 
-# --- 데이터 파일 정의 ---
+# --- [수정] 데이터 파일 경로 정의 (Render Disk 용) ---
+DISK_PATH = '/var/data'
+if not os.path.exists(DISK_PATH):
+    # 로컬 환경 테스트를 위해 폴더가 없으면 생성
+    os.makedirs(DISK_PATH)
+
 ATTENDEES_TODAY = []
-ATTENDANCE_FILE = 'attendance_log.json'
-USERS_FILE = 'users.json'
+ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
+USERS_FILE = os.path.join(DISK_PATH, 'users.json')
+
 
 # (타이머 데이터는 이전과 동일)
 CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'], 'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2], 'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0] }
-FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 1, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
+FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 2, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
 
 # --- 파일 관리 함수 ---
@@ -59,7 +66,7 @@ def perform_turn_switch(state):
 
 # --- 라우트 (API) ---
 
-# --- [수정] 로그인/회원가입 라우트 ---
+# --- 로그인/회원가입 라우트 ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -72,7 +79,6 @@ def login():
         if user_data and check_password_hash(user_data['password_hash'], password):
             session['user_id'] = user_id
             session['user_name'] = user_data['name']
-            # 새로 추가된 정보도 세션에 저장
             session['member_type'] = user_data.get('member_type', '정보 없음')
             return redirect(url_for('index'))
         else:
@@ -88,7 +94,6 @@ def signup():
         password = request.form['password']
         password_confirm = request.form['password_confirm']
         unique_code = request.form['unique_code']
-        # 새로운 필드 정보 추가
         cohort = request.form['cohort']
         member_type = request.form['member_type']
         
@@ -102,7 +107,6 @@ def signup():
             flash('고유코드가 올바르지 않습니다.')
         else:
             hashed_password = generate_password_hash(password)
-            # 새로운 필드 정보를 포함하여 사용자 데이터 저장
             users[user_id] = {
                 'name': name,
                 'password_hash': hashed_password,
@@ -120,7 +124,7 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# --- [수정] 메인 앱 라우트 (로그인 필요) ---
+# --- 메인 앱 라우트 (로그인 필요) ---
 @app.route('/')
 def index():
     if 'user_id' not in session:
@@ -312,4 +316,5 @@ def setup_step():
     if step_type == 2: session['timer_state'] = {'runtime': runtime_sec, 'pros_timestamp': [], 'cons_timestamp': [], 'turn': 'pros', 'turn_timestamp': []}
     else: session['timer_state'] = { 'runtime': runtime_sec, 'timestamp': [] }
 if __name__ == '__main__':
+    # Render는 gunicorn을 사용하므로, 이 부분은 로컬 테스트 시에만 실행됩니다.
     app.run(debug=True, host='0.0.0.0', port=5001)
