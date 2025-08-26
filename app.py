@@ -2,7 +2,7 @@ import time
 import io
 import qrcode
 import json
-import os # 'os' 모듈
+import os # 'os' 모듈 필수
 from datetime import datetime
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -11,11 +11,16 @@ from openpyxl import Workbook
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
 
-# --- 데이터 파일 경로 정의 (Render Disk 용) ---
+# --- [중요] Render Disk 데이터 파일 경로 정의 ---
 DISK_PATH = '/var/data'
+# 로컬 환경 테스트를 위해 폴더가 없으면 자동으로 생성하는 코드
 if not os.path.exists(DISK_PATH):
-    # 로컬 환경 테스트를 위해 폴더가 없으면 생성
-    os.makedirs(DISK_PATH)
+    try:
+        os.makedirs(DISK_PATH)
+    except OSError as e:
+        # Render 환경에서는 이 경로가 자동으로 마운트되므로 오류가 나지 않아야 합니다.
+        print(f"Error creating directory {DISK_PATH}: {e}")
+
 
 ATTENDEES_TODAY = []
 ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
@@ -24,7 +29,7 @@ USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 
 # 타이머 데이터
 CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'], 'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2], 'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0] }
-FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 1, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
+FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 2, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
 
 # --- 파일 관리 함수 ---
@@ -33,11 +38,16 @@ def load_json_file(filename):
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
+        # 파일이 없거나 비어있을 경우, users.json은 dict, 나머지는 list 반환
         return {} if 'users' in filename else []
 
 def save_json_file(data, filename):
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving file {filename}: {e}")
+
 
 # 헬퍼 함수들
 def formalize(sec): sec = int(sec); return f"{sec//60:02d}:{sec%60:02d}"
@@ -131,7 +141,7 @@ def index():
         return redirect(url_for('login'))
     return render_template('index.html')
 
-# 출석 및 타이머 라우트 (이전과 동일)
+# 출석 및 타이머 라우트
 @app.route('/start_attendance', methods=['POST'])
 def start_attendance():
     global ATTENDEES_TODAY
@@ -317,4 +327,5 @@ def setup_step():
     else: session['timer_state'] = { 'runtime': runtime_sec, 'timestamp': [] }
 
 if __name__ == '__main__':
+    # 이 부분은 Render에서 사용되지 않으며, 로컬 테스트 시에만 실행됩니다.
     app.run(debug=True, host='0.0.0.0', port=5001)
