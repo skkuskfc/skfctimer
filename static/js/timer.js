@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainTitle = document.getElementById('main-title');
     const contentArea = document.getElementById('content-area');
     let appInterval = null;
+    let qrInterval = null; // QR 코드 갱신을 위한 인터벌 변수 추가
 
     const activeMenuItem = document.querySelector('.menu-item.active');
     if (activeMenuItem) {
@@ -18,7 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function loadContentFor(item) {
+        // 기존에 실행되던 모든 인터벌을 초기화
         if (appInterval) clearInterval(appInterval);
+        if (qrInterval) clearInterval(qrInterval);
+
         contentArea.innerHTML = '';
         sessionStorage.removeItem('current_mode');
 
@@ -26,13 +30,21 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (contentType === 'attendance') {
             contentArea.innerHTML = getAttendanceHTML();
-            fetch('/start_attendance', { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    const qrImg = document.getElementById('qr-code-img');
-                    if(qrImg) qrImg.src = `/qrcode?url=${encodeURIComponent(data.check_in_url)}`;
-                });
-            fetchAttendees();
+            // 백엔드 출석 세션 초기화
+            fetch('/start_attendance', { method: 'POST' });
+
+            const qrImg = document.getElementById('qr-code-img');
+            const updateQRCode = () => {
+                if (qrImg) {
+                    // 브라우저 캐시를 피하기 위해 타임스탬프를 파라미터로 추가
+                    qrImg.src = `/qrcode?t=${new Date().getTime()}`;
+                }
+            };
+            
+            updateQRCode(); // 페이지 로드 시 즉시 QR 코드 표시
+            qrInterval = setInterval(updateQRCode, 10000); // 10초마다 QR 코드 갱신
+
+            fetchAttendees(); // 출석자 명단 갱신
             appInterval = setInterval(fetchAttendees, 2000);
         
         } else if (contentType === 'history') {
@@ -42,11 +54,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const exportButton = document.getElementById('export-excel-btn');
 
             if(datePicker) {
-                // 오늘 날짜를 기본값으로 설정 (YYYY-MM-DD 형식)
                 datePicker.value = new Date().toISOString().split('T')[0];
-                // 페이지 로드 시 오늘 날짜 기록 바로 조회
                 fetchHistory(datePicker.value);
-                // 날짜 변경 시 기록 조회
                 datePicker.addEventListener('change', (e) => fetchHistory(e.target.value));
             }
             if(resetButton) {
@@ -86,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // (이하 모든 JS 함수는 이전 답변과 동일)
+    // (이하 모든 JS 함수는 기존과 동일)
     function getAttendanceHTML() {
         const today = new Date();
         const month = String(today.getMonth() + 1).padStart(2, '0');

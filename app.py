@@ -17,6 +17,7 @@ if not os.path.exists(DISK_PATH):
     os.makedirs(DISK_PATH)
 
 ATTENDEES_TODAY = []
+USED_TOKENS = set()  # 사용된 출석 토큰을 저장 (수정)
 ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
 USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 
@@ -29,14 +30,11 @@ GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['
 # --- 파일 관리 함수 (수정된 부분) ---
 def load_json_file(filename):
     try:
-        # 파일이 비어있을 경우 json.load가 에러를 일으키므로 먼저 확인
         if os.path.getsize(filename) == 0:
             return {}
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # users.json과 attendance_log.json 모두 루트가 딕셔너리이므로
-        # 파일이 없거나 JSON 형식이 아닐 경우, 빈 딕셔너리를 반환합니다.
         return {}
 
 def save_json_file(data, filename):
@@ -136,54 +134,93 @@ def index():
         return redirect(url_for('login'))
     return render_template('index.html')
 
-# 출석 및 타이머 라우트
+# --- 출석 및 타이머 라우트 (수정된 부분) ---
 @app.route('/start_attendance', methods=['POST'])
 def start_attendance():
-    global ATTENDEES_TODAY
+    global ATTENDEES_TODAY, USED_TOKENS
+    USED_TOKENS.clear()  # 새 출석 세션 시작 시 사용된 토큰 초기화
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
-    raw_list = log.get(today_str, []) # 이제 log는 항상 딕셔너리이므로 .get() 사용 가능
+    raw_list = log.get(today_str, [])
     sanitized_list = [item for item in raw_list if isinstance(item, dict) and 'name' in item and 'type' in item]
     ATTENDEES_TODAY = sanitized_list
-    check_in_url = url_for('check_in_page', _external=True)
-    return jsonify({'status': 'attendance started', 'check_in_url': check_in_url})
+    return jsonify({'status': 'attendance started'})
 
 @app.route('/qrcode')
 def qr_code():
-    url = request.args.get('url')
-    if not url: return "URL not provided", 400
+    # URL을 동적으로, 10초 유효 시간 기반 토큰을 포함하여 생성
+    token = int(time.time() / 10)
+    url = url_for('check_in_page', token=token, _external=True)
+    
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-    qr.add_data(url); qr.make(fit=True)
+    qr.add_data(url)
+    qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO(); img.save(buf); buf.seek(0)
+    buf = io.BytesIO()
+    img.save(buf)
+    buf.seek(0)
     return send_file(buf, mimetype='image/png')
 
 @app.route('/check_in')
-def check_in_page(): return render_template('check_in.html')
+def check_in_page():
+    global USED_TOKENS
+    received_token_str = request.args.get('token')
+    
+    if not received_token_str or not received_token_str.isdigit():
+        return "<h1>유효하지 않은 접근입니다.</h1>", 400
+    
+    received_token = int(received_token_str)
+    current_token = int(time.time() / 10)
+
+    # 현재 토큰 또는 바로 이전 토큰(딜레이 감안)까지만 유효
+    if not (current_token == received_token or current_token - 1 == received_token):
+        return "<h1>만료된 QR코드입니다. 새로고침된 QR코드를 이용해주세요.</h1>", 400
+
+    if received_token in USED_TOKENS:
+        return "<h1>이미 사용된 QR코드입니다.</h1>", 400
+
+    session['attendance_token'] = received_token
+    return render_template('check_in.html')
 
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
-    global ATTENDEES_TODAY
-    name = request.form.get('name', '').strip(); member_type = request.form.get('member_type', '기타')
+    global ATTENDEES_TODAY, USED_TOKENS
+    token = session.get('attendance_token')
+
+    if token is None:
+        return "<h1>잘못된 접근입니다. QR코드를 통해 다시 시도해주세요.</h1>", 400
+
+    if token in USED_TOKENS:
+        return "<h1>이미 출석체크를 완료했습니다. 이 창을 닫아주세요.</h1>", 400
+
+    name = request.form.get('name', '').strip()
+    member_type = request.form.get('member_type', '기타')
+
     if name and member_type:
         new_attendee = {'name': name, 'type': member_type}
-        
         today_str = datetime.now().strftime('%Y-%m-%d')
         log = load_json_file(ATTENDANCE_FILE)
         
-        # 오늘 날짜의 출석 기록이 없으면 새로 생성
         if today_str not in log:
             log[today_str] = []
             
-        # 중복 출석 방지
-        if not any(a['name'] == name for a in log[today_str]):
-            log[today_str].append(new_attendee)
-            if not any(a['name'] == name for a in ATTENDEES_TODAY):
-                ATTENDEES_TODAY.append(new_attendee)
+        if any(a['name'] == name for a in log[today_str]):
+            return f"<h1>'{name}'님은 이미 출석 명단에 있습니다.</h1><p>이 창을 닫아주세요.</p>"
+        
+        log[today_str].append(new_attendee)
+        if not any(a['name'] == name for a in ATTENDEES_TODAY):
+            ATTENDEES_TODAY.append(new_attendee)
 
         save_json_file(log, ATTENDANCE_FILE)
         
-    return "<h1>출석이 완료되었습니다.</h1><p>이 창을 닫아주세요.</p>"
+        USED_TOKENS.add(token)
+        session.pop('attendance_token', None)
+        
+        return "<h1>출석이 완료되었습니다.</h1><p>이 창을 닫아주세요.</p>"
+    
+    return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
+
+# (이하 코드는 기존과 동일)
 
 @app.route('/get_attendees')
 def get_attendees(): global ATTENDEES_TODAY; return jsonify({'attendees': ATTENDEES_TODAY})
@@ -196,7 +233,7 @@ def get_history_by_date():
     date_str = request.args.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
     log = load_json_file(ATTENDANCE_FILE)
-    attendees = log.get(date_str, []) # 이제 log는 항상 딕셔너리이므로 .get() 사용 가능
+    attendees = log.get(date_str, [])
     return jsonify({'attendees': attendees})
 
 @app.route('/reset_attendance_by_date', methods=['POST'])
