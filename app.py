@@ -172,6 +172,7 @@ def check_in_page():
     session['attendance_token'] = received_token
     return render_template('check_in.html')
 
+# MODIFIED: submit_name to handle late/present status and timestamp
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
     global USED_TOKENS
@@ -181,23 +182,34 @@ def submit_name():
 
     name = request.form.get('name', '').strip()
     member_type = request.form.get('member_type', '기타')
+    check_in_time = datetime.now()
 
     if name and member_type:
-        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_str = check_in_time.strftime('%Y-%m-%d')
         log = load_json_file(ATTENDANCE_FILE)
         
-        if today_str not in log: log[today_str] = []
+        today_data = log.get(today_str, {'settings': {'cutoff_time': '18:00'}, 'attendees': []})
         
+        cutoff_time_str = today_data.get('settings', {}).get('cutoff_time', '18:00')
+        cutoff_datetime = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
+
+        status = '출석' if check_in_time <= cutoff_datetime else '지각'
+        timestamp_str = check_in_time.strftime('%H:%M:%S')
+
+        attendees = today_data.get('attendees', [])
         member_found = False
-        for member in log[today_str]:
+        for member in attendees:
             if member['name'] == name:
-                member['status'] = '출석'
+                member['status'] = status
+                member['timestamp'] = timestamp_str
                 member_found = True
                 break
         
         if not member_found:
-            log[today_str].append({'name': name, 'type': member_type, 'status': '출석'})
-
+            attendees.append({'name': name, 'type': member_type, 'status': status, 'timestamp': timestamp_str})
+        
+        today_data['attendees'] = attendees
+        log[today_str] = today_data
         save_json_file(log, ATTENDANCE_FILE)
         USED_TOKENS.add(token)
         session.pop('attendance_token', None)
@@ -205,13 +217,18 @@ def submit_name():
     
     return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
 
+# MODIFIED: get_todays_attendance to return settings
 @app.route('/api/todays_attendance')
 def get_todays_attendance():
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
-    attendees = log.get(today_str, [])
-    return jsonify({'attendees': attendees})
+    today_data = log.get(today_str, {'settings': {'cutoff_time': '18:00'}, 'attendees': []})
+    return jsonify({
+        'attendees': today_data.get('attendees', []),
+        'settings': today_data.get('settings', {'cutoff_time': '18:00'})
+    })
 
+# MODIFIED: initialize_attendance_with_roster to handle new data structure
 @app.route('/api/initialize_attendance_with_roster', methods=['POST'])
 def initialize_attendance_with_roster():
     current_cohort_id = get_current_cohort()
@@ -229,17 +246,46 @@ def initialize_attendance_with_roster():
         initial_attendance.append({
             'name': member.get('name'),
             'type': member.get('activity_type'),
-            'status': '결석'
+            'status': '결석',
+            'timestamp': ''
         })
 
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
-    log[today_str] = initial_attendance
+    
+    existing_settings = log.get(today_str, {}).get('settings', {'cutoff_time': '18:00'})
+    
+    log[today_str] = {
+        'attendees': initial_attendance,
+        'settings': existing_settings
+    }
     save_json_file(log, ATTENDANCE_FILE)
             
-    return jsonify({'attendees': initial_attendance})
+    return jsonify({
+        'attendees': initial_attendance,
+        'settings': existing_settings
+    })
 
 # --- 출석 기록 및 명단 관리 ---
+
+# MODIFIED: New route to set the attendance cutoff time
+@app.route('/api/set_cutoff_time', methods=['POST'])
+def set_cutoff_time():
+    data = request.json
+    date_str = data.get('date')
+    cutoff_time = data.get('cutoff_time')
+    if not date_str or not cutoff_time:
+        return jsonify({'error': 'Date and cutoff time are required'}), 400
+
+    log = load_json_file(ATTENDANCE_FILE)
+    if date_str not in log:
+        log[date_str] = {'settings': {}, 'attendees': []}
+    
+    log[date_str]['settings'] = {'cutoff_time': cutoff_time}
+    save_json_file(log, ATTENDANCE_FILE)
+    return jsonify({'status': 'success'})
+
+# MODIFIED: update_attendance_status to handle new data structure
 @app.route('/api/update_attendance_status', methods=['POST'])
 def update_attendance_status():
     data = request.json
@@ -247,22 +293,27 @@ def update_attendance_status():
     if not all([date_str, name, new_status]): return jsonify({'error': '필수 정보가 누락되었습니다.'}), 400
 
     log = load_json_file(ATTENDANCE_FILE)
-    if date_str in log:
-        for attendee in log[date_str]:
+    if date_str in log and 'attendees' in log[date_str]:
+        for attendee in log[date_str]['attendees']:
             if attendee['name'] == name:
                 attendee['status'] = new_status
+                if new_status == '결석':
+                    attendee['timestamp'] = ''
                 save_json_file(log, ATTENDANCE_FILE)
                 return jsonify({'status': 'success'})
     return jsonify({'error': '해당 날짜 또는 참석자를 찾을 수 없습니다.'}), 404
 
+# MODIFIED: get_history_by_date to handle new data structure
 @app.route('/get_history_by_date')
 def get_history_by_date():
     date_str = request.args.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
     log = load_json_file(ATTENDANCE_FILE)
-    attendees = log.get(date_str, [])
+    date_data = log.get(date_str, {})
+    attendees = date_data.get('attendees', [])
     for attendee in attendees:
         if 'status' not in attendee: attendee['status'] = '출석' 
+        if 'timestamp' not in attendee: attendee['timestamp'] = ''
     return jsonify({'attendees': attendees})
 
 @app.route('/reset_attendance_by_date', methods=['POST'])
@@ -275,6 +326,7 @@ def reset_attendance_by_date():
         save_json_file(log, ATTENDANCE_FILE)
     return jsonify({'status': f'{date_str} attendance reset'})
 
+# MODIFIED: export_excel to include timestamp and better summary
 @app.route('/export_excel')
 def export_excel():
     date_str = request.args.get('date')
@@ -290,18 +342,30 @@ def export_excel():
         filename = f"attendance_{date_str}.xlsx"
 
     log = load_json_file(ATTENDANCE_FILE)
-    attendees = log.get(date_str, [])
+    date_data = log.get(date_str, {})
+    attendees = date_data.get('attendees', [])
     
     wb = Workbook(); ws = wb.active; ws.title = date_str
-    ws.append(['이름', '부원 구분', '출석 상태'])
+    ws.append(['이름', '부원 구분', '출석 상태', '출석 시간'])
     present_count = 0
+    late_count = 0
     for attendee in attendees:
         status = attendee.get('status', '출석')
         if status == '출석':
             present_count += 1
-        ws.append([attendee.get('name', ''), attendee.get('type', ''), status])
+        elif status == '지각':
+            late_count +=1
+        ws.append([
+            attendee.get('name', ''), 
+            attendee.get('type', ''), 
+            status,
+            attendee.get('timestamp', '')
+        ])
     
-    ws.append([]); ws.append([f"해당 일자 출석 인원: {present_count}명"])
+    ws.append([])
+    total_attended = present_count + late_count
+    ws.append([f"총원: {len(attendees)}명"])
+    ws.append([f"참석: {total_attended}명 (출석: {present_count}명, 지각: {late_count}명)"])
 
     excel_buffer = io.BytesIO(); wb.save(excel_buffer); excel_buffer.seek(0)
     return send_file(excel_buffer, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

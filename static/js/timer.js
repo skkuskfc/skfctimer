@@ -30,7 +30,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (contentType === 'attendance') {
             contentArea.innerHTML = getAttendanceHTML();
+            // MODIFIED: Added event listener for new button
             document.getElementById('load-roster-btn').addEventListener('click', initializeAttendanceWithRoster);
+            document.getElementById('set-cutoff-time-btn').addEventListener('click', setCutoffTime);
             fetch('/start_attendance', { method: 'POST' });
 
             const qrImg = document.getElementById('qr-code-img');
@@ -83,6 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- 출석 관리 (Attendance) ---
+
+    // MODIFIED: getAttendanceHTML to include cutoff time input
     function getAttendanceHTML() {
         const today = new Date();
         const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -97,12 +101,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="attendee-list-panel">
                     <div class="roster-header">
                         <h2 id="attendance-title">${dateString} 출석 현황</h2>
-                        <button id="load-roster-btn" class="action-btn">현 기수 불러오기</button>
+                        <div class="attendance-controls">
+                            <label for="cutoff-time-input">출석 인정 마감:</label>
+                            <input type="time" id="cutoff-time-input" value="18:00">
+                            <button id="set-cutoff-time-btn" class="action-btn">시간 설정</button>
+                            <button id="load-roster-btn" class="action-btn">현 기수 불러오기</button>
+                        </div>
                     </div>
                     <ul id="attendee-list"></ul>
                     <div class="total-count" id="attendee-total"></div>
                 </div>
             </div>`;
+    }
+
+    // MODIFIED: New function to set the cutoff time
+    async function setCutoffTime() {
+        const cutoffTime = document.getElementById('cutoff-time-input').value;
+        if (!cutoffTime) {
+            alert('시간을 선택해주세요.');
+            return;
+        }
+        const today_str = new Date().toISOString().split('T')[0];
+        try {
+            const response = await fetch('/api/set_cutoff_time', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: today_str, cutoff_time: cutoffTime })
+            });
+            if (!response.ok) throw new Error('시간 설정 실패');
+            alert(`출석 인정 시간이 ${cutoffTime}으로 설정되었습니다.`);
+        } catch (error) {
+            console.error("출석 시간 설정 중 오류:", error);
+            alert('시간 설정에 실패했습니다.');
+        }
     }
 
     async function initializeAttendanceWithRoster() {
@@ -121,16 +152,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // MODIFIED: fetchTodaysAttendance to update the time input field
     async function fetchTodaysAttendance() {
         try {
             const response = await fetch('/api/todays_attendance');
             const data = await response.json();
+            if (data.settings && data.settings.cutoff_time) {
+                const timeInput = document.getElementById('cutoff-time-input');
+                if (timeInput) {
+                    timeInput.value = data.settings.cutoff_time;
+                }
+            }
             displayAttendanceList(data.attendees);
         } catch (error) {
             console.error("오늘 출석 현황 로딩 중 오류:", error);
         }
     }
     
+    // MODIFIED: displayAttendanceList to show timestamp and improved summary
     function displayAttendanceList(attendees) {
         const listElement = document.getElementById('attendee-list');
         const totalElement = document.getElementById('attendee-total');
@@ -150,11 +189,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 <li>
                     <span class="name">${member.name}</span>
                     <span class="type">${member.type}</span>
-                    ${statusIcons[member.status] || ''}
+                    <div class="attendance-info">
+                        <span class="timestamp">${member.timestamp || ''}</span>
+                        ${statusIcons[member.status] || ''}
+                    </div>
                 </li>
             `).join('');
-            const presentCount = attendees.filter(m => m.status === '출석' || m.status === '지각').length;
-            totalElement.textContent = `총원: ${attendees.length}명 / 출석: ${presentCount}명`;
+            const presentCount = attendees.filter(m => m.status === '출석').length;
+            const lateCount = attendees.filter(m => m.status === '지각').length;
+            totalElement.textContent = `총원: ${attendees.length}명 / 참석: ${presentCount + lateCount}명 (출석: ${presentCount}, 지각: ${lateCount})`;
         }
     }
     
@@ -176,6 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
+    // MODIFIED: fetchHistory to display timestamp
     async function fetchHistory(date) {
         const listElement = document.getElementById('history-attendee-list');
         const totalElement = document.getElementById('history-total');
@@ -191,11 +235,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <li>
                         <span class="name">${a.name}</span>
                         <span class="type">${a.type}</span>
-                        <select class="status-dropdown" data-name="${a.name}" data-date="${date}">
-                            <option value="출석" ${a.status === '출석' ? 'selected' : ''}>출석</option>
-                            <option value="지각" ${a.status === '지각' ? 'selected' : ''}>지각</option>
-                            <option value="결석" ${a.status === '결석' ? 'selected' : ''}>결석</option>
-                        </select>
+                        <div class="attendance-info">
+                            <span class="timestamp">${a.timestamp || ''}</span>
+                            <select class="status-dropdown" data-name="${a.name}" data-date="${date}">
+                                <option value="출석" ${a.status === '출석' ? 'selected' : ''}>출석</option>
+                                <option value="지각" ${a.status === '지각' ? 'selected' : ''}>지각</option>
+                                <option value="결석" ${a.status === '결석' ? 'selected' : ''}>결석</option>
+                            </select>
+                        </div>
                     </li>
                 `).join('');
                 document.querySelectorAll('.status-dropdown').forEach(dropdown => {
@@ -224,7 +271,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!response.ok) throw new Error('상태 업데이트 실패');
             dropdown.closest('li').style.backgroundColor = '#d4edda';
-            setTimeout(() => { dropdown.closest('li').style.backgroundColor = ''; }, 1000);
+            setTimeout(() => { 
+                dropdown.closest('li').style.backgroundColor = ''; 
+                fetchHistory(date); // Re-fetch to update timestamp if status changed to '결석'
+            }, 1000);
         } catch (error) {
             console.error("출석 상태 업데이트 중 오류:", error);
             alert('출석 상태 업데이트에 실패했습니다.');

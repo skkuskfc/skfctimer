@@ -68,19 +68,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .free-timer-circle .timer-svg { position: absolute; top: 0; left: 0; z-index: 2; }
 .free-timer-circle .turn-progress-track { stroke: rgba(245, 239, 231, 0.3); stroke-width: 4; }
 .free-timer-circle .turn-progress { stroke: #F5EFE7; stroke-width: 4; stroke-dasharray: 339.292; transition: stroke-dashoffset 0.5s linear; }
-
-/* --- 수정된 부분 --- */
-.timer-text-content {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    position: relative;
-    z-index: 1;
-}
-
+.timer-text-content { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; height: 100%; position: relative; z-index: 1; }
 .free-timer-title { font-size: clamp(16px, 3vw, 28px); font-weight: 300; }
 .free-timer-time { font-size: clamp(32px, 5.5vw, 60px); font-weight: 400; margin-top: 10px; }
 .turn-timer { text-align: center; visibility: hidden; opacity: 0; transition: opacity 0.3s linear; }
@@ -109,8 +97,8 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .ceda-timer-view:fullscreen { padding: 2vw; }
 .ceda-timer-view:fullscreen .timeline-panel { width: 25%; height: 90%; }
 .ceda-timer-view:fullscreen .timer-panel { height: 100%; }
-.ceda-timer-view:fullscreen .timer-display-area { width: 70%; max-width: 70vh; } /* 크기 증가 */
-.ceda-timer-view:fullscreen .free-timer-circle { width: 85%; max-width: 45vh; } /* 크기 규칙 추가 */
+.ceda-timer-view:fullscreen .timer-display-area { width: 70%; max-width: 70vh; }
+.ceda-timer-view:fullscreen .free-timer-circle { width: 85%; max-width: 45vh; }
 .ceda-timer-view:fullscreen .turn-timer-title { font-size: 2vw; }
 .ceda-timer-view:fullscreen .turn-timer-time { font-size: 4vw; }
 
@@ -125,7 +113,8 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .attendee-list-panel { flex: 1; overflow: hidden; }
 .attendee-list-panel h2 { font-size: 24px; font-weight: 600; color: #333; flex-shrink: 0; }
 #attendee-list, #history-attendee-list { list-style: none; width: 100%; padding: 0; overflow-y: auto; font-size: 22px; flex-grow: 1; }
-#attendee-list li, #history-attendee-list li { display: flex; justify-content: flex-start; align-items: center; padding: 15px 20px; border-bottom: 1px solid #e0e0e0; gap: 20px; position: relative; }
+/* MODIFIED: List item style updated for flexbox layout */
+#attendee-list li, #history-attendee-list li { display: flex; align-items: center; padding: 15px 20px; border-bottom: 1px solid #e0e0e0; gap: 20px; }
 #attendee-list li:last-child, #history-attendee-list li:last-child { border-bottom: none; }
 .name { font-weight: 600; width: 120px; flex-shrink: 0; }
 .type { font-size: 16px; color: #fff; background-color: #4A5568; padding: 4px 10px; border-radius: 12px; }
@@ -142,11 +131,19 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 #history-results { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
 .total-count { width: 100%; padding: 15px 20px; border-top: 2px solid #e0e0e0; font-size: 20px; font-weight: 700; text-align: center; color: #333; flex-shrink: 0; }
 .roster-header { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 20px; }
-.status-icon { font-size: 14px; font-weight: bold; color: white; padding: 4px 12px; border-radius: 12px; position: absolute; right: 20px; top: 50%; transform: translateY(-50%); }
+/* MODIFIED: New styles for attendance controls and info block */
+.attendance-controls { display: flex; align-items: center; gap: 10px; }
+.attendance-controls label { font-weight: 600; font-size: 16px; }
+.attendance-controls input[type="time"] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+.attendance-info { margin-left: auto; display: flex; align-items: center; gap: 20px; }
+.timestamp { font-size: 18px; color: #555; width: 80px; text-align: right; }
+/* MODIFIED: Status icon style updated to work with flexbox */
+.status-icon { font-size: 14px; font-weight: bold; color: white; padding: 4px 12px; border-radius: 12px; width: 65px; text-align: center; }
 .status-icon.present { background-color: #38A169; } /* 초록 */
 .status-icon.absent { background-color: #E53E3E; } /* 빨강 */
 .status-icon.late { background-color: #D69E2E; } /* 노랑 */
-.status-dropdown { padding: 5px 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 15px; background-color: #fff; position: absolute; right: 20px; }
+/* MODIFIED: Status dropdown style updated to work with flexbox */
+.status-dropdown { padding: 5px 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 15px; background-color: #fff; }
 
 /* --- 부원 명단 관리 --- */
 .roster-container { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 20px; gap: 20px; }
@@ -170,5 +167,3 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .modal-content .date-range { display: flex; align-items: center; gap: 10px; }
 .modal-content button[type="submit"] { background-color: #4A5568; color: white; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
 .close-btn { background: none; border: none; font-size: 24px; cursor: pointer; position: absolute; top: 10px; right: 15px; color: #888; }
-
-
