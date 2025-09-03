@@ -188,15 +188,24 @@ def submit_name():
         today_str = check_in_time.strftime('%Y-%m-%d')
         log = load_json_file(ATTENDANCE_FILE)
         
-        today_data = log.get(today_str, {'settings': {'cutoff_time': '18:00'}, 'attendees': []})
-        
-        cutoff_time_str = today_data.get('settings', {}).get('cutoff_time', '18:00')
+        # MODIFIED: Robustly handle old (list) and new (dict) data formats
+        today_log_entry = log.get(today_str)
+        if isinstance(today_log_entry, list):
+            attendees = today_log_entry
+            settings = {'cutoff_time': '18:00'}
+        elif isinstance(today_log_entry, dict):
+            attendees = today_log_entry.get('attendees', [])
+            settings = today_log_entry.get('settings', {'cutoff_time': '18:00'})
+        else:
+            attendees = []
+            settings = {'cutoff_time': '18:00'}
+
+        cutoff_time_str = settings.get('cutoff_time', '18:00')
         cutoff_datetime = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
 
         status = '출석' if check_in_time <= cutoff_datetime else '지각'
         timestamp_str = check_in_time.strftime('%H:%M:%S')
 
-        attendees = today_data.get('attendees', [])
         member_found = False
         for member in attendees:
             if member['name'] == name:
@@ -208,8 +217,8 @@ def submit_name():
         if not member_found:
             attendees.append({'name': name, 'type': member_type, 'status': status, 'timestamp': timestamp_str})
         
-        today_data['attendees'] = attendees
-        log[today_str] = today_data
+        # MODIFIED: Always save in the new format
+        log[today_str] = {'settings': settings, 'attendees': attendees}
         save_json_file(log, ATTENDANCE_FILE)
         USED_TOKENS.add(token)
         session.pop('attendance_token', None)
@@ -217,16 +226,24 @@ def submit_name():
     
     return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
 
-# MODIFIED: get_todays_attendance to return settings
+# MODIFIED: get_todays_attendance to robustly handle old/new data formats
 @app.route('/api/todays_attendance')
 def get_todays_attendance():
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
-    today_data = log.get(today_str, {'settings': {'cutoff_time': '18:00'}, 'attendees': []})
-    return jsonify({
-        'attendees': today_data.get('attendees', []),
-        'settings': today_data.get('settings', {'cutoff_time': '18:00'})
-    })
+    today_log_entry = log.get(today_str)
+
+    if isinstance(today_log_entry, list):
+        attendees = today_log_entry
+        settings = {'cutoff_time': '18:00'}
+    elif isinstance(today_log_entry, dict):
+        attendees = today_log_entry.get('attendees', [])
+        settings = today_log_entry.get('settings', {'cutoff_time': '18:00'})
+    else:
+        attendees = []
+        settings = {'cutoff_time': '18:00'}
+    
+    return jsonify({'attendees': attendees, 'settings': settings})
 
 # MODIFIED: initialize_attendance_with_roster to handle new data structure
 @app.route('/api/initialize_attendance_with_roster', methods=['POST'])
@@ -253,7 +270,11 @@ def initialize_attendance_with_roster():
     today_str = datetime.now().strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
     
-    existing_settings = log.get(today_str, {}).get('settings', {'cutoff_time': '18:00'})
+    today_log_entry = log.get(today_str)
+    if isinstance(today_log_entry, dict):
+        existing_settings = today_log_entry.get('settings', {'cutoff_time': '18:00'})
+    else:
+        existing_settings = {'cutoff_time': '18:00'}
     
     log[today_str] = {
         'attendees': initial_attendance,
@@ -278,7 +299,7 @@ def set_cutoff_time():
         return jsonify({'error': 'Date and cutoff time are required'}), 400
 
     log = load_json_file(ATTENDANCE_FILE)
-    if date_str not in log:
+    if date_str not in log or isinstance(log.get(date_str), list):
         log[date_str] = {'settings': {}, 'attendees': []}
     
     log[date_str]['settings'] = {'cutoff_time': cutoff_time}
@@ -293,15 +314,31 @@ def update_attendance_status():
     if not all([date_str, name, new_status]): return jsonify({'error': '필수 정보가 누락되었습니다.'}), 400
 
     log = load_json_file(ATTENDANCE_FILE)
-    if date_str in log and 'attendees' in log[date_str]:
-        for attendee in log[date_str]['attendees']:
-            if attendee['name'] == name:
-                attendee['status'] = new_status
-                if new_status == '결석':
-                    attendee['timestamp'] = ''
-                save_json_file(log, ATTENDANCE_FILE)
-                return jsonify({'status': 'success'})
-    return jsonify({'error': '해당 날짜 또는 참석자를 찾을 수 없습니다.'}), 404
+    date_log_entry = log.get(date_str)
+    if not date_log_entry: return jsonify({'error': '해당 날짜를 찾을 수 없습니다.'}), 404
+
+    if isinstance(date_log_entry, list):
+        attendees = date_log_entry
+        settings = {}
+    else: # Is a dict
+        attendees = date_log_entry.get('attendees', [])
+        settings = date_log_entry.get('settings', {})
+
+    member_found = False
+    for attendee in attendees:
+        if attendee['name'] == name:
+            attendee['status'] = new_status
+            if new_status == '결석':
+                attendee['timestamp'] = ''
+            member_found = True
+            break
+    
+    if member_found:
+        log[date_str] = {'settings': settings, 'attendees': attendees}
+        save_json_file(log, ATTENDANCE_FILE)
+        return jsonify({'status': 'success'})
+
+    return jsonify({'error': '해당 참석자를 찾을 수 없습니다.'}), 404
 
 # MODIFIED: get_history_by_date to handle new data structure
 @app.route('/get_history_by_date')
@@ -309,8 +346,15 @@ def get_history_by_date():
     date_str = request.args.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
     log = load_json_file(ATTENDANCE_FILE)
-    date_data = log.get(date_str, {})
-    attendees = date_data.get('attendees', [])
+    date_log_entry = log.get(date_str)
+
+    if isinstance(date_log_entry, list):
+        attendees = date_log_entry
+    elif isinstance(date_log_entry, dict):
+        attendees = date_log_entry.get('attendees', [])
+    else:
+        attendees = []
+
     for attendee in attendees:
         if 'status' not in attendee: attendee['status'] = '출석' 
         if 'timestamp' not in attendee: attendee['timestamp'] = ''
@@ -342,8 +386,14 @@ def export_excel():
         filename = f"attendance_{date_str}.xlsx"
 
     log = load_json_file(ATTENDANCE_FILE)
-    date_data = log.get(date_str, {})
-    attendees = date_data.get('attendees', [])
+    date_log_entry = log.get(date_str)
+
+    if isinstance(date_log_entry, list):
+        attendees = date_log_entry
+    elif isinstance(date_log_entry, dict):
+        attendees = date_log_entry.get('attendees', [])
+    else:
+        attendees = []
     
     wb = Workbook(); ws = wb.active; ws.title = date_str
     ws.append(['이름', '부원 구분', '출석 상태', '출석 시간'])
