@@ -199,7 +199,8 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 }
 .modal-content {
     background: white; padding: 30px 40px; border-radius: 10px;
-    width: 450px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    width: 480px; /* 이 값을 늘렸습니다. */
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
     position: relative;
 }
 .modal-content h2 { margin-bottom: 20px; text-align: center; }
