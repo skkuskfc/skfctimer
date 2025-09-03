@@ -2,6 +2,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #E5E5E5; font-family: "Pretendard", sans-serif; min-width: 1525px; min-height: 850px; overflow: auto; }
 #app-container { width: 100%; height: 100%; display: flex; background: #FFFFFF; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
 /* --- 로그인 & 회원가입 --- */
 .auth-container { width: 100%; height: 100vh; display: flex; justify-content: center; align-items: center; background-color: #f0f2f5; }
 .auth-box { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; width: 400px; }
@@ -13,6 +14,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .auth-box .btn-primary:hover { background-color: #2D3748; }
 .auth-box .btn-secondary { display: inline-block; margin-top: 15px; color: #4A5568; text-decoration: none; font-weight: 600; }
 .flash-error { background-color: #fed7d7; color: #c53030; padding: 10px; border-radius: 8px; margin: -10px 0 15px 0; }
+
 /* --- 사이드바 --- */
 .sidebar { width: 320px; background: #4A5568; padding: 40px; display: flex; flex-direction: column; color: #FFFFFF; flex-shrink: 0; }
 .logo { display: flex; align-items: center; gap: 15px; margin-bottom: 60px; }
@@ -23,6 +25,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .menu-item { width: 100%; padding: 15px 20px; border: none; background: transparent; border-radius: 8px; font-size: 18px; font-weight: 600; color: #FFFFFF; text-align: left; cursor: pointer; transition: background-color 0.2s ease; }
 .menu-item:hover { background-color: rgba(255, 255, 255, 0.1); }
 .menu-item.active { background-color: #FFFFFF; color: #333333; }
+
 /* --- 메인 콘텐츠 --- */
 .main-content { flex-grow: 1; padding: 25px 40px 40px 40px; display: flex; flex-direction: column; background-color: #FFFFFF; }
 .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
@@ -32,6 +35,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .logout-btn { padding: 8px 16px; background-color: #4A5568; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; }
 .version { font-weight: 600; font-size: 16px; color: #A0A0A0; }
 .content-area { flex-grow: 1; border-radius: 8px; overflow: hidden; }
+
 /* --- CEDA 타이머 --- */
 .ceda-timer-view { display: flex; width: 100%; height: 100%; background-color: #27384E; color: #F5EFE7; border-radius: 8px; position: relative; overflow: hidden; }
 .timeline-panel { width: 380px; padding: 20px 0; box-sizing: border-box; border-right: 1px solid #555; overflow-y: auto; flex-shrink: 0; }
@@ -61,8 +65,22 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .pros-panel .color-fill { background-color: #3a506b; } .cons-panel .color-fill { background-color: #9E3637; }
 .debate-panel:not(.active) { opacity: 0.5; }
 .free-timer-circle { width: 70%; max-width: 280px; aspect-ratio: 1/1; border-radius: 50%; display: flex; justify-content: center; align-items: center; position: relative; }
+.free-timer-circle .timer-svg { position: absolute; top: 0; left: 0; z-index: 2; }
 .free-timer-circle .turn-progress-track { stroke: rgba(245, 239, 231, 0.3); stroke-width: 4; }
 .free-timer-circle .turn-progress { stroke: #F5EFE7; stroke-width: 4; stroke-dasharray: 339.292; transition: stroke-dashoffset 0.5s linear; }
+
+/* --- 수정된 부분 --- */
+.timer-text-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+}
+
 .free-timer-title { font-size: clamp(16px, 3vw, 28px); font-weight: 300; }
 .free-timer-time { font-size: clamp(32px, 5.5vw, 60px); font-weight: 400; margin-top: 10px; }
 .turn-timer { text-align: center; visibility: hidden; opacity: 0; transition: opacity 0.3s linear; }
@@ -86,6 +104,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .stopped .debate-panel.active .panel-toggle-btn { width: 0; height: 0; border-top: 20px solid transparent; border-bottom: 20px solid transparent; border-left: 30px solid #F5EFE7; }
 .running .debate-panel.active .panel-toggle-btn { width: 30px; border-left: 10px solid #F5EFE7; border-right: 10px solid #F5EFE7; height: 40px; }
 #fullscreen-btn { position: absolute; top: 20px; right: 20px; font-size: 16px; font-weight: 600; color: #F5EFE7; background-color: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 20px; cursor: pointer; }
+
 /* --- 출석 & 기록 공통 --- */
 .attendance-container, .history-container { display: flex; width: 100%; height: 100%; padding: 30px; gap: 40px; }
 .history-container { flex-direction: column; gap: 20px; }
@@ -118,6 +137,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .status-icon.absent { background-color: #E53E3E; } /* 빨강 */
 .status-icon.late { background-color: #D69E2E; } /* 노랑 */
 .status-dropdown { padding: 5px 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 15px; background-color: #fff; position: absolute; right: 20px; }
+
 /* --- 부원 명단 관리 --- */
 .roster-container { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 20px; gap: 20px; }
 .roster-controls { display: flex; gap: 15px; align-items: center; }
@@ -129,6 +149,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 #roster-table tbody tr:hover { background-color: #f9f9f9; }
 .roster-input, .roster-select { width: 100%; padding: 8px; font-size: 15px; border: 1px solid #ccc; border-radius: 4px; }
 .delete-row-btn { background-color: #E53E3E; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-weight: bold; font-size: 16px; line-height: 28px; text-align: center; }
+
 /* --- 기수 관리 모달 --- */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; }
 .modal-content { background: white; padding: 30px 40px; border-radius: 10px; width: 480px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }
@@ -139,3 +160,4 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .modal-content .date-range { display: flex; align-items: center; gap: 10px; }
 .modal-content button[type="submit"] { background-color: #4A5568; color: white; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
 .close-btn { background: none; border: none; font-size: 24px; cursor: pointer; position: absolute; top: 10px; right: 15px; color: #888; }
+
