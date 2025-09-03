@@ -30,7 +30,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (contentType === 'attendance') {
             contentArea.innerHTML = getAttendanceHTML();
-            // MODIFIED: Added event listener for new button
             document.getElementById('load-roster-btn').addEventListener('click', initializeAttendanceWithRoster);
             document.getElementById('set-cutoff-time-btn').addEventListener('click', setCutoffTime);
             fetch('/start_attendance', { method: 'POST' });
@@ -85,8 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- 출석 관리 (Attendance) ---
-
-    // MODIFIED: getAttendanceHTML to include cutoff time input
     function getAttendanceHTML() {
         const today = new Date();
         const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -114,7 +111,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
-    // MODIFIED: New function to set the cutoff time
     async function setCutoffTime() {
         const cutoffTime = document.getElementById('cutoff-time-input').value;
         if (!cutoffTime) {
@@ -152,7 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // MODIFIED: fetchTodaysAttendance to update the time input field
     async function fetchTodaysAttendance() {
         try {
             const response = await fetch('/api/todays_attendance');
@@ -169,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // MODIFIED: displayAttendanceList to show timestamp and improved summary
+    // MODIFIED: displayAttendanceList to remove timestamp and change summary format
     function displayAttendanceList(attendees) {
         const listElement = document.getElementById('attendee-list');
         const totalElement = document.getElementById('attendee-total');
@@ -190,14 +185,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="name">${member.name}</span>
                     <span class="type">${member.type}</span>
                     <div class="attendance-info">
-                        <span class="timestamp">${member.timestamp || ''}</span>
                         ${statusIcons[member.status] || ''}
                     </div>
                 </li>
             `).join('');
             const presentCount = attendees.filter(m => m.status === '출석').length;
             const lateCount = attendees.filter(m => m.status === '지각').length;
-            totalElement.textContent = `총원: ${attendees.length}명 / 참석: ${presentCount + lateCount}명 (출석: ${presentCount}, 지각: ${lateCount})`;
+            const absentCount = attendees.filter(m => m.status === '결석').length;
+            totalElement.textContent = `총원: ${attendees.length}명 (출석: ${presentCount}명, 지각: ${lateCount}명, 결석: ${absentCount}명)`;
         }
     }
     
@@ -219,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
-    // MODIFIED: fetchHistory to display timestamp
+    // NOTE: fetchHistory still shows timestamp as requested
     async function fetchHistory(date) {
         const listElement = document.getElementById('history-attendee-list');
         const totalElement = document.getElementById('history-total');
@@ -273,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dropdown.closest('li').style.backgroundColor = '#d4edda';
             setTimeout(() => { 
                 dropdown.closest('li').style.backgroundColor = ''; 
-                fetchHistory(date); // Re-fetch to update timestamp if status changed to '결석'
+                fetchHistory(date);
             }, 1000);
         } catch (error) {
             console.error("출석 상태 업데이트 중 오류:", error);

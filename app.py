@@ -3,7 +3,7 @@ import io
 import qrcode
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
@@ -21,6 +21,9 @@ ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
 USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 COHORTS_FILE = os.path.join(DISK_PATH, 'cohorts.json')
 ROSTER_FILE = os.path.join(DISK_PATH, 'roster.json')
+
+# MODIFIED: KST 타임존 정의
+KST = timezone(timedelta(hours=9))
 
 
 # --- 타이머 데이터 ---
@@ -172,7 +175,7 @@ def check_in_page():
     session['attendance_token'] = received_token
     return render_template('check_in.html')
 
-# MODIFIED: submit_name to handle late/present status and timestamp
+# MODIFIED: submit_name to handle KST timezone
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
     global USED_TOKENS
@@ -182,13 +185,12 @@ def submit_name():
 
     name = request.form.get('name', '').strip()
     member_type = request.form.get('member_type', '기타')
-    check_in_time = datetime.now()
+    check_in_time = datetime.now(KST)
 
     if name and member_type:
         today_str = check_in_time.strftime('%Y-%m-%d')
         log = load_json_file(ATTENDANCE_FILE)
         
-        # MODIFIED: Robustly handle old (list) and new (dict) data formats
         today_log_entry = log.get(today_str)
         if isinstance(today_log_entry, list):
             attendees = today_log_entry
@@ -201,7 +203,7 @@ def submit_name():
             settings = {'cutoff_time': '18:00'}
 
         cutoff_time_str = settings.get('cutoff_time', '18:00')
-        cutoff_datetime = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
+        cutoff_datetime = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M').replace(tzinfo=KST)
 
         status = '출석' if check_in_time <= cutoff_datetime else '지각'
         timestamp_str = check_in_time.strftime('%H:%M:%S')
@@ -217,7 +219,6 @@ def submit_name():
         if not member_found:
             attendees.append({'name': name, 'type': member_type, 'status': status, 'timestamp': timestamp_str})
         
-        # MODIFIED: Always save in the new format
         log[today_str] = {'settings': settings, 'attendees': attendees}
         save_json_file(log, ATTENDANCE_FILE)
         USED_TOKENS.add(token)
@@ -229,7 +230,7 @@ def submit_name():
 # MODIFIED: get_todays_attendance to robustly handle old/new data formats
 @app.route('/api/todays_attendance')
 def get_todays_attendance():
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = datetime.now(KST).strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
     today_log_entry = log.get(today_str)
 
@@ -267,7 +268,7 @@ def initialize_attendance_with_roster():
             'timestamp': ''
         })
 
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = datetime.now(KST).strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
     
     today_log_entry = log.get(today_str)
@@ -288,8 +289,6 @@ def initialize_attendance_with_roster():
     })
 
 # --- 출석 기록 및 명단 관리 ---
-
-# MODIFIED: New route to set the attendance cutoff time
 @app.route('/api/set_cutoff_time', methods=['POST'])
 def set_cutoff_time():
     data = request.json
@@ -306,7 +305,6 @@ def set_cutoff_time():
     save_json_file(log, ATTENDANCE_FILE)
     return jsonify({'status': 'success'})
 
-# MODIFIED: update_attendance_status to handle new data structure
 @app.route('/api/update_attendance_status', methods=['POST'])
 def update_attendance_status():
     data = request.json
@@ -340,7 +338,6 @@ def update_attendance_status():
 
     return jsonify({'error': '해당 참석자를 찾을 수 없습니다.'}), 404
 
-# MODIFIED: get_history_by_date to handle new data structure
 @app.route('/get_history_by_date')
 def get_history_by_date():
     date_str = request.args.get('date')
@@ -370,7 +367,6 @@ def reset_attendance_by_date():
         save_json_file(log, ATTENDANCE_FILE)
     return jsonify({'status': f'{date_str} attendance reset'})
 
-# MODIFIED: export_excel to include timestamp and better summary
 @app.route('/export_excel')
 def export_excel():
     date_str = request.args.get('date')
