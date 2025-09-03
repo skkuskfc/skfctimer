@@ -22,7 +22,7 @@ USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 COHORTS_FILE = os.path.join(DISK_PATH, 'cohorts.json')
 ROSTER_FILE = os.path.join(DISK_PATH, 'roster.json')
 
-# MODIFIED: KST 타임존 정의
+# KST 타임존 정의
 KST = timezone(timedelta(hours=9))
 
 
@@ -175,7 +175,7 @@ def check_in_page():
     session['attendance_token'] = received_token
     return render_template('check_in.html')
 
-# MODIFIED: submit_name to handle KST timezone
+# MODIFIED: Bug fix in time comparison logic
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
     global USED_TOKENS
@@ -203,7 +203,13 @@ def submit_name():
             settings = {'cutoff_time': '18:00'}
 
         cutoff_time_str = settings.get('cutoff_time', '18:00')
-        cutoff_datetime = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M').replace(tzinfo=KST)
+        
+        # --- MODIFIED LOGIC START ---
+        # 마감 시간을 해당 분의 마지막 초로 설정 (예: 18:36 -> 18:36:59)
+        naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
+        effective_cutoff = naive_cutoff + timedelta(seconds=59)
+        cutoff_datetime = effective_cutoff.replace(tzinfo=KST)
+        # --- MODIFIED LOGIC END ---
 
         status = '출석' if check_in_time <= cutoff_datetime else '지각'
         timestamp_str = check_in_time.strftime('%H:%M:%S')
@@ -227,7 +233,6 @@ def submit_name():
     
     return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
 
-# MODIFIED: get_todays_attendance to robustly handle old/new data formats
 @app.route('/api/todays_attendance')
 def get_todays_attendance():
     today_str = datetime.now(KST).strftime('%Y-%m-%d')
@@ -246,7 +251,6 @@ def get_todays_attendance():
     
     return jsonify({'attendees': attendees, 'settings': settings})
 
-# MODIFIED: initialize_attendance_with_roster to handle new data structure
 @app.route('/api/initialize_attendance_with_roster', methods=['POST'])
 def initialize_attendance_with_roster():
     current_cohort_id = get_current_cohort()
