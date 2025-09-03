@@ -12,22 +12,23 @@
         <aside class="sidebar">
             <div class="logo"><h1>SKFC</h1><div class="logo-text"><span>세션 관리</span><span>웹</span></div></div>
             <nav class="menu">
-                <button class="menu-item" data-content="attendance">출석 관리</button>
+                <button class="menu-item active" data-content="attendance">출석 관리</button>
                 <button class="menu-item" data-content="history">출석 기록</button>
-                <button class="menu-item active" data-content="ceda-timer">복합 CEDA 타이머</button>
+                <button class="menu-item" data-content="member-roster">부원 명단 관리</button>
+                <button class="menu-item" data-content="ceda-timer">복합 CEDA 타이머</button>
                 <button class="menu-item" data-content="free-timer">자유토론 타이머</button>
                 <button class="menu-item" data-content="general-timer">일반 타이머</button>
             </nav>
         </aside>
         <main class="main-content">
             <header class="main-header">
-                <h1 id="main-title">복합 CEDA 타이머</h1>
+                <h1 id="main-title">출석 관리</h1>
                 <div class="header-right">
                     {% if session.user_name %}
                         <span class="user-info">{{ session.user_name }}({{ session.member_type }})님 환영합니다.</span>
                         <a href="{{ url_for('logout') }}" class="logout-btn">로그아웃</a>
                     {% endif %}
-                    <span class="version">Ver 2.0.5</span>
+                    <span class="version">Ver 2.1.0</span>
                 </div>
             </header>
             <section id="content-area" class="content-area">

@@ -26,7 +26,6 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 /* --- 메인 콘텐츠 --- */
 .main-content {
     flex-grow: 1;
-    /* [수정] 상단 여백을 줄여서 깨져보이는 현상 수정 */
     padding: 25px 40px 40px 40px;
     display: flex;
     flex-direction: column;
@@ -115,11 +114,11 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .qr-panel h2 { font-size: 24px; font-weight: 600; color: #333; text-align: center; line-height: 1.5; margin-bottom: 30px; }
 #qr-code-img { width: 350px; height: 350px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .attendee-list-panel { flex: 1; overflow: hidden; }
-.attendee-list-panel h2 { font-size: 24px; font-weight: 600; color: #333; margin-bottom: 20px; flex-shrink: 0; }
+.attendee-list-panel h2 { font-size: 24px; font-weight: 600; color: #333; flex-shrink: 0; }
 #attendee-list, #history-attendee-list { list-style: none; width: 100%; padding: 0; overflow-y: auto; font-size: 22px; flex-grow: 1; }
-#attendee-list li, #history-attendee-list li { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #e0e0e0; }
+#attendee-list li, #history-attendee-list li { display: flex; justify-content: flex-start; align-items: center; padding: 15px 20px; border-bottom: 1px solid #e0e0e0; gap: 20px; position: relative; }
 #attendee-list li:last-child, #history-attendee-list li:last-child { border-bottom: none; }
-#attendee-list li .name, #history-attendee-list li .name { font-weight: 600; }
+#attendee-list li .name, #history-attendee-list li .name { font-weight: 600; width: 120px; }
 #attendee-list li .type, #history-attendee-list li .type { font-size: 16px; color: #fff; background-color: #4A5568; padding: 4px 10px; border-radius: 12px; }
 /* --- 출석 기록 스타일 --- */
 .history-container { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 30px; gap: 20px; }
@@ -134,3 +133,79 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .total-count { width: 100%; padding: 15px 20px; border-top: 2px solid #e0e0e0; font-size: 20px; font-weight: 700; text-align: center; color: #333; flex-shrink: 0; }
 .reset-btn { background-color: #c53030; }
 .export-btn { background-color: #2d8540; }
+
+/* --- 새로 추가된 스타일 --- */
+.roster-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 20px;
+}
+.action-btn {
+    padding: 8px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    background-color: #4A5568;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.action-btn:hover { background-color: #2D3748; }
+
+.status-icon {
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.status-icon.present { background-color: #38A169; }
+.status-icon.absent { background-color: #E53E3E; }
+
+.status-dropdown {
+    padding: 5px 8px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    font-size: 15px;
+    background-color: #fff;
+    position: absolute;
+    right: 20px;
+}
+.status-dropdown option[value="지각"] { background-color: #FEFCBF; }
+
+.roster-container { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 20px; gap: 20px; }
+.roster-controls { display: flex; gap: 15px; align-items: center; }
+.roster-controls select { padding: 8px; font-size: 16px; border-radius: 6px; border: 1px solid #ccc; }
+.roster-table-container { flex-grow: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; }
+#roster-table { width: 100%; border-collapse: collapse; }
+#roster-table th, #roster-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+#roster-table th { background-color: #f4f7f9; font-weight: 600; position: sticky; top: 0; }
+#roster-table tbody tr:hover { background-color: #f9f9f9; }
+.roster-input, .roster-select { width: 100%; padding: 8px; font-size: 15px; border: 1px solid #ccc; border-radius: 4px; }
+.delete-row-btn { background-color: #E53E3E; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-weight: bold; font-size: 16px; line-height: 28px; text-align: center; }
+
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.6);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: white; padding: 30px 40px; border-radius: 10px;
+    width: 450px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    position: relative;
+}
+.modal-content h2 { margin-bottom: 20px; text-align: center; }
+.modal-content form { display: flex; flex-direction: column; gap: 15px; }
+.modal-content label { font-weight: 600; margin-top: 5px; }
+.modal-content input, .modal-content select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; }
+.modal-content .date-range { display: flex; align-items: center; gap: 10px; }
+.modal-content button[type="submit"] { background-color: #4A5568; color: white; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
+.close-btn { background: none; border: none; font-size: 24px; cursor: pointer; position: absolute; top: 10px; right: 15px; color: #888; }
