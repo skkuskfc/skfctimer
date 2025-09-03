@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let appInterval = null;
     let qrInterval = null;
 
-    // 초기 활성 메뉴 아이템에 대한 콘텐츠 로드
     const activeMenuItem = document.querySelector('.menu-item.active');
     if (activeMenuItem) {
         mainTitle.textContent = activeMenuItem.textContent;
@@ -31,62 +30,47 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (contentType === 'attendance') {
             contentArea.innerHTML = getAttendanceHTML();
-            document.getElementById('load-roster-btn').addEventListener('click', loadCurrentRosterForAttendance);
-            
+            document.getElementById('load-roster-btn').addEventListener('click', initializeAttendanceWithRoster);
             fetch('/start_attendance', { method: 'POST' });
 
             const qrImg = document.getElementById('qr-code-img');
             const updateQRCode = () => {
-                if (qrImg) {
-                    qrImg.src = `/qrcode?t=${new Date().getTime()}`;
-                }
+                if (qrImg) qrImg.src = `/qrcode?t=${new Date().getTime()}`;
             };
-            
             updateQRCode();
             qrInterval = setInterval(updateQRCode, 10000);
 
-            // 5초마다 출석 현황 자동 갱신
-            appInterval = setInterval(loadCurrentRosterForAttendance, 5000);
+            fetchTodaysAttendance(); // 최초 로드
+            appInterval = setInterval(fetchTodaysAttendance, 3000); // 3초마다 실시간 업데이트
         
         } else if (contentType === 'history') {
             contentArea.innerHTML = getHistoryHTML();
             const datePicker = document.getElementById('history-date-picker');
-            const resetButton = document.getElementById('reset-history-btn');
-            const exportButton = document.getElementById('export-excel-btn');
+            datePicker.value = new Date().toISOString().split('T')[0];
+            fetchHistory(datePicker.value);
+            datePicker.addEventListener('change', (e) => fetchHistory(e.target.value));
 
-            if(datePicker) {
-                datePicker.value = new Date().toISOString().split('T')[0];
-                fetchHistory(datePicker.value);
-                datePicker.addEventListener('change', (e) => fetchHistory(e.target.value));
-            }
-            if(resetButton) {
-                resetButton.addEventListener('click', () => {
-                    const selectedDate = datePicker.value;
-                    if (!selectedDate) { alert('날짜를 먼저 선택해주세요.'); return; }
-                    if (confirm(`${selectedDate}의 출석 기록을 정말로 초기화하시겠습니까?`)) {
-                        resetHistory(selectedDate);
-                    }
-                });
-            }
-            if(exportButton) {
-                exportButton.addEventListener('click', () => {
-                    const selectedDate = datePicker.value;
-                    if (!selectedDate) { alert('날짜를 먼저 선택해주세요.'); return; }
-                    window.location.href = `/export_excel?date=${selectedDate}`;
-                });
-            }
+            document.getElementById('reset-history-btn').addEventListener('click', () => {
+                const selectedDate = datePicker.value;
+                if (!selectedDate) { alert('날짜를 먼저 선택해주세요.'); return; }
+                if (confirm(`${selectedDate}의 출석 기록을 정말로 초기화하시겠습니까?`)) {
+                    resetHistory(selectedDate);
+                }
+            });
+            document.getElementById('export-excel-btn').addEventListener('click', () => {
+                const selectedDate = datePicker.value;
+                if (!selectedDate) { alert('날짜를 먼저 선택해주세요.'); return; }
+                window.location.href = `/export_excel?date=${selectedDate}`;
+            });
         } else if (contentType === 'member-roster') {
             contentArea.innerHTML = getMemberRosterHTML();
             initializeRosterPage();
         } else if (['ceda-timer', 'free-timer', 'general-timer'].includes(contentType)) {
             let startEndpoint = '';
-            if (contentType === 'ceda-timer') {
-                startEndpoint = '/start_ceda_timer'; sessionStorage.setItem('current_mode', 'ceda');
-            } else if (contentType === 'free-timer') {
-                startEndpoint = '/start_free_timer'; sessionStorage.setItem('current_mode', 'free_debate');
-            } else if (contentType === 'general-timer') {
-                startEndpoint = '/start_general_timer'; sessionStorage.setItem('current_mode', 'general');
-            }
+            if (contentType === 'ceda-timer') startEndpoint = '/start_ceda_timer';
+            else if (contentType === 'free-timer') startEndpoint = '/start_free_timer';
+            else if (contentType === 'general-timer') startEndpoint = '/start_general_timer';
+            
             contentArea.innerHTML = getTimerHTML();
             fetch(startEndpoint, { method: 'POST' })
                 .then(() => {
@@ -98,12 +82,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // --- 출석 관리 (Attendance) 관련 함수들 ---
+    // --- 출석 관리 (Attendance) ---
     function getAttendanceHTML() {
         const today = new Date();
         const month = String(today.getMonth() + 1).padStart(2, '0');
         const day = String(today.getDate()).padStart(2, '0');
-        const dateString = `${month}.${day}`;
+        const dateString = `${month}월 ${day}일`;
         return `
             <div class="attendance-container">
                 <div class="qr-panel">
@@ -121,49 +105,60 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
-    async function loadCurrentRosterForAttendance() {
+    async function initializeAttendanceWithRoster() {
+        if (!confirm('현 기수 명단을 불러와 오늘 출석부를 시작합니다. 기존 출석 정보가 있다면 덮어씌워집니다. 계속하시겠습니까?')) return;
         try {
-            const response = await fetch('/api/load_current_roster');
+            const response = await fetch('/api/initialize_attendance_with_roster', { method: 'POST' });
             const data = await response.json();
-            
             if (!response.ok) {
-                alert(data.error || '명단 로딩 실패');
-                document.getElementById('attendee-list').innerHTML = `<li>${data.error}</li>`
+                alert(data.error || '명단 초기화 실패');
                 return;
             }
-
-            const listElement = document.getElementById('attendee-list');
-            const totalElement = document.getElementById('attendee-total');
-            
-            document.getElementById('attendance-title').textContent = `${data.cohort_id} 출석 현황`;
-
-            const statusIcons = {
-                '출석': '<span class="status-icon present">출석</span>',
-                '결석': '<span class="status-icon absent">결석</span>'
-            };
-            
-            if (data.roster.length === 0) {
-                 listElement.innerHTML = `<li>현재 기수 명단이 비어있습니다. '부원 명단 관리' 탭에서 명단을 추가해주세요.</li>`;
-            } else {
-                 listElement.innerHTML = data.roster.map(member => `
-                    <li>
-                        <span class="name">${member.name}</span>
-                        <span class="type">${member.activity_type}</span>
-                        ${statusIcons[member.attendance_status] || ''}
-                    </li>
-                `).join('');
-            }
-
-            const presentCount = data.roster.filter(m => m.attendance_status === '출석').length;
-            totalElement.textContent = `총원: ${data.roster.length}명 / 출석: ${presentCount}명`;
-
+            displayAttendanceList(data.attendees);
         } catch (error) {
-            console.error("현 기수 명단 로딩 중 오류:", error);
-            document.getElementById('attendee-list').innerHTML = `<li>명단 로딩 중 오류 발생.</li>`
+            console.error("출석부 초기화 중 오류:", error);
+            alert('출석부를 초기화하는 중 오류가 발생했습니다.');
         }
     }
     
-    // --- 출석 기록 (History) 관련 함수들 ---
+    async function fetchTodaysAttendance() {
+        try {
+            const response = await fetch('/api/todays_attendance');
+            const data = await response.json();
+            displayAttendanceList(data.attendees);
+        } catch (error) {
+            console.error("오늘 출석 현황 로딩 중 오류:", error);
+        }
+    }
+    
+    function displayAttendanceList(attendees) {
+        const listElement = document.getElementById('attendee-list');
+        const totalElement = document.getElementById('attendee-total');
+        if (!listElement || !totalElement) return;
+
+        const statusIcons = {
+            '출석': '<span class="status-icon present">출석</span>',
+            '결석': '<span class="status-icon absent">결석</span>',
+            '지각': '<span class="status-icon late">지각</span>'
+        };
+
+        if (!attendees || attendees.length === 0) {
+            listElement.innerHTML = `<li>'현 기수 불러오기' 버튼을 눌러 출석부를 시작하세요.</li>`;
+            totalElement.textContent = `총 인원: 0명`;
+        } else {
+            listElement.innerHTML = attendees.map(member => `
+                <li>
+                    <span class="name">${member.name}</span>
+                    <span class="type">${member.type}</span>
+                    ${statusIcons[member.status] || ''}
+                </li>
+            `).join('');
+            const presentCount = attendees.filter(m => m.status === '출석' || m.status === '지각').length;
+            totalElement.textContent = `총원: ${attendees.length}명 / 출석: ${presentCount}명`;
+        }
+    }
+    
+    // --- 출석 기록 (History) ---
     function getHistoryHTML() {
         return `
             <div class="history-container">
@@ -203,11 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         </select>
                     </li>
                 `).join('');
-                
                 document.querySelectorAll('.status-dropdown').forEach(dropdown => {
                     dropdown.addEventListener('change', updateAttendanceStatus);
                 });
-
             } else {
                 listElement.innerHTML = '<li>해당 날짜의 출석 기록이 없습니다.</li>';
             }
@@ -215,7 +208,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error("출석 기록 조회 중 오류:", error);
             listElement.innerHTML = '<li>기록을 불러오는 데 실패했습니다.</li>';
-            totalElement.textContent = '오류 발생';
         }
     }
     
@@ -224,7 +216,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = dropdown.dataset.name;
         const date = dropdown.dataset.date;
         const newStatus = dropdown.value;
-
         try {
             const response = await fetch('/api/update_attendance_status', {
                 method: 'POST',
@@ -255,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 부원 명단 관리 (Member Roster) 관련 함수들 ---
+    // --- 부원 명단 관리 (Member Roster) ---
     function getMemberRosterHTML() {
         return `
             <div class="roster-container">
@@ -267,13 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="roster-table-container">
                     <table id="roster-table">
                         <thead>
-                            <tr>
-                                <th>이름</th>
-                                <th>기수</th>
-                                <th>활동 구분</th>
-                                <th>비고</th>
-                                <th>삭제</th>
-                            </tr>
+                            <tr><th>이름</th><th>기수</th><th>활동 구분</th><th>비고</th><th>삭제</th></tr>
                         </thead>
                         <tbody></tbody>
                     </table>
@@ -294,8 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button type="submit">기수 등록/수정</button>
                     </form>
                 </div>
-            </div>
-        `;
+            </div>`;
     }
 
     async function initializeRosterPage() {
@@ -321,9 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const sortedCohorts = Object.keys(cohorts).sort((a, b) => parseInt(b) - parseInt(a));
 
-        sortedCohorts.forEach(id => {
-            select.add(new Option(id, id));
-        });
+        sortedCohorts.forEach(id => select.add(new Option(id, id)));
         
         if (currentSelected && sortedCohorts.includes(currentSelected)) {
             select.value = currentSelected;
@@ -334,15 +316,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const start = new Date(cohorts[id].start_date);
                 const end = new Date(cohorts[id].end_date);
                 if (start <= today && today <= end) {
-                    currentCohort = id;
-                    break;
+                    currentCohort = id; break;
                 }
             }
-            if (currentCohort) {
-                select.value = currentCohort;
-            }
+            if (currentCohort) select.value = currentCohort;
         }
-        
         await loadRosterForSelectedCohort();
     }
 
@@ -376,11 +354,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await fetch(`/api/roster/${cohortId}`);
         const roster = await response.json();
         
-        if (roster.length > 0) {
-            roster.forEach(member => addRosterRow(member));
-        } else {
-             tbody.innerHTML = '<tr><td colspan="5">등록된 부원이 없습니다. "부원 추가" 버튼으로 명단을 만드세요.</td></tr>';
-        }
+        if (roster.length > 0) roster.forEach(member => addRosterRow(member));
+        else tbody.innerHTML = '<tr><td colspan="5">등록된 부원이 없습니다. "부원 추가" 버튼으로 명단을 만드세요.</td></tr>';
     }
 
     function addRosterRow(member = {}) {
@@ -394,37 +369,25 @@ document.addEventListener('DOMContentLoaded', () => {
         row.innerHTML = `
             <td><input type="text" class="roster-input" value="${member.name || ''}" placeholder="이름"></td>
             <td><input type="text" class="roster-input" value="${member.cohort || document.getElementById('cohort-select').value}" placeholder="기수"></td>
-            <td>
-                <select class="roster-select">
-                    ${activityTypes.map(type => `<option value="${type}" ${member.activity_type === type ? 'selected' : ''}>${type}</option>`).join('')}
-                </select>
-            </td>
+            <td><select class="roster-select">${activityTypes.map(type => `<option value="${type}" ${member.activity_type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td>
             <td><input type="text" class="roster-input" value="${member.remarks || ''}" placeholder="비고"></td>
-            <td><button class="delete-row-btn">&times;</button></td>
-        `;
+            <td><button class="delete-row-btn">&times;</button></td>`;
         row.querySelector('.delete-row-btn').addEventListener('click', () => {
-            if (confirm('해당 부원을 명단에서 삭제하시겠습니까?')) {
-                row.remove();
-            }
+            if (confirm('해당 부원을 명단에서 삭제하시겠습니까?')) row.remove();
         });
     }
     
     async function saveRoster() {
         const cohortId = document.getElementById('cohort-select').value;
-        if (!cohortId) {
-            alert('저장할 기수를 먼저 선택해주세요.');
-            return;
-        }
+        if (!cohortId) { alert('저장할 기수를 먼저 선택해주세요.'); return; }
 
         const rosterData = [];
         document.querySelectorAll('#roster-table tbody tr').forEach(row => {
             const inputs = row.querySelectorAll('input, select');
             if (inputs.length > 0 && inputs[0].value.trim()) {
                 rosterData.push({
-                    name: inputs[0].value,
-                    cohort: inputs[1].value,
-                    activity_type: inputs[2].value,
-                    remarks: inputs[3].value,
+                    name: inputs[0].value, cohort: inputs[1].value,
+                    activity_type: inputs[2].value, remarks: inputs[3].value,
                 });
             }
         });
@@ -437,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(`${cohortId} 명단이 저장되었습니다.`);
     }
 
-    // --- 타이머 관련 함수들 ---
+    // --- 타이머 관련 (변경 없음) ---
     async function fetchStatus() {
         try {
             const response = await fetch('/status');
@@ -445,7 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (!data.active) {
                 if(appInterval) clearInterval(appInterval);
-                sessionStorage.removeItem('current_mode');
                 return;
             }
             updateUI(data);
@@ -460,16 +422,13 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTimelineUI(data);
         const customInputArea = document.getElementById('custom-time-input-area');
         if (customInputArea) {
-            const isCustomInputStep = data.mode === 'general' && data.step_name === '직접 입력';
-            customInputArea.style.display = isCustomInputStep ? 'flex' : 'none';
+            customInputArea.style.display = (data.mode === 'general' && data.step_name === '직접 입력') ? 'flex' : 'none';
         }
         if (data.type === 'sequence') {
-            timerView.classList.remove('free-debate-mode');
-            timerView.classList.add('sequence-mode');
+            timerView.className = 'ceda-timer-view sequence-mode';
             updateSequenceUI(data);
         } else if (data.type === 'free_debate') {
-            timerView.classList.remove('sequence-mode');
-            timerView.classList.add('free-debate-mode');
+            timerView.className = 'ceda-timer-view free-debate-mode';
             updateFreeDebateUI(data);
         }
         timerView.classList.toggle('running', data.is_running);
@@ -478,21 +437,18 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateTimelineUI(data) {
         const timelineList = document.getElementById('timeline-list');
         if (!timelineList) return;
-        let timelineHtml = '';
-        data.timeline.names.forEach((name, i) => {
-            const activeClass = (i === data.step) ? 'active' : '';
-            timelineHtml += `<div class="timeline-item ${activeClass}" data-step-index="${i}"><span>${name}</span></div>`;
-        });
-        timelineList.innerHTML = timelineHtml;
+        timelineList.innerHTML = data.timeline.names.map((name, i) => 
+            `<div class="timeline-item ${i === data.step ? 'active' : ''}" data-step-index="${i}"><span>${name}</span></div>`
+        ).join('');
     }
     function updateSequenceUI(data) {
         const view = document.getElementById('sequence-timer-display');
         if (!view) return;
-        const timerProgressCircle = view.querySelector('.timer-progress');
-        const circleRadius = timerProgressCircle.r.baseVal.value;
-        const circumference = 2 * Math.PI * circleRadius;
+        const circle = view.querySelector('.timer-progress');
+        const r = circle.r.baseVal.value;
+        const C = 2 * Math.PI * r;
         const progress = data.runtime > 0 ? data.remain_sec / data.runtime : 0;
-        timerProgressCircle.style.strokeDashoffset = circumference * (1 - progress);
+        circle.style.strokeDashoffset = C * (1 - progress);
         view.querySelector('#timer-title').textContent = data.step_name;
         view.querySelector('#timer-time').textContent = data.time_str;
     }
@@ -501,26 +457,24 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('cons-time').textContent = data.cons_time_str;
         document.getElementById('pros-turn-time').textContent = data.turn_time_str;
         document.getElementById('cons-turn-time').textContent = data.turn_time_str;
+        
         const prosPanel = document.getElementById('pros-panel');
         const consPanel = document.getElementById('cons-panel');
         prosPanel.classList.toggle('active', data.turn === 'pros');
         consPanel.classList.toggle('active', data.turn === 'cons');
-        const prosFill = document.getElementById('pros-fill');
-        const consFill = document.getElementById('cons-fill');
-        if(data.pros_runtime > 0) prosFill.style.height = `${(data.pros_remain_sec / data.pros_runtime) * 100}%`;
-        if(data.cons_runtime > 0) consFill.style.height = `${(data.cons_remain_sec / data.cons_runtime) * 100}%`;
-        const turnProgress = data.turn_remain_sec / 120;
-        const activeCircle = document.querySelector('.debate-panel.active .turn-progress');
-        const inactiveCircle = document.querySelector('.debate-panel:not(.active) .turn-progress');
+        
+        document.getElementById('pros-fill').style.height = `${(data.pros_remain_sec / data.pros_runtime) * 100}%`;
+        document.getElementById('cons-fill').style.height = `${(data.cons_remain_sec / data.cons_runtime) * 100}%`;
+
         const setCircleDash = (circle, progress) => {
             if (circle) {
-                const radius = circle.r.baseVal.value;
-                const circumference = 2 * Math.PI * radius;
-                circle.style.strokeDashoffset = circumference * (1 - progress);
+                const r = circle.r.baseVal.value;
+                const C = 2 * Math.PI * r;
+                circle.style.strokeDashoffset = C * (1 - progress);
             }
         };
-        setCircleDash(activeCircle, turnProgress);
-        setCircleDash(inactiveCircle, 0);
+        setCircleDash(document.querySelector('.debate-panel.active .turn-progress'), data.turn_remain_sec / 120);
+        setCircleDash(document.querySelector('.debate-panel:not(.active) .turn-progress'), 0);
     }
     function getTimerHTML() {
         return `
@@ -550,7 +504,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
-    // 전역 이벤트 리스너 (동적 생성 요소 처리)
     contentArea.addEventListener('click', (e) => {
         const target = e.target;
         if (target.id === 'set-custom-time-btn') {
@@ -560,37 +513,41 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const actionMap = {
-            '.timeline-item': () => { const stepIndex = parseInt(target.closest('.timeline-item').dataset.stepIndex, 10); fetch('/set_step', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: stepIndex }) }); },
+            '.timeline-item': (el) => { const stepIndex = parseInt(el.dataset.stepIndex, 10); fetch('/set_step', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: stepIndex }) }); },
             '.debate-panel:not(.active)': () => fetch('/switch_turn', { method: 'POST' }),
             '.panel-toggle-btn': () => fetch('/toggle_timer', { method: 'POST' }),
             '#toggle-btn': () => fetch('/toggle_timer', { method: 'POST' }),
-            '.panel-time-adjust-btn': () => { const seconds = parseInt(target.dataset.seconds, 10); fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: seconds}) }); },
-            '#fullscreen-btn': () => { const view = document.getElementById('timer-view-container'); if (view && !document.fullscreenElement) view.requestFullscreen().catch(err => console.error(err)); else if (document.exitFullscreen) document.exitFullscreen(); },
+            '.panel-time-adjust-btn': (el) => { const seconds = parseInt(el.dataset.seconds, 10); fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: seconds}) }); },
+            '#fullscreen-btn': () => { const view = document.getElementById('timer-view-container'); if (view && !document.fullscreenElement) view.requestFullscreen(); else if (document.exitFullscreen) document.exitFullscreen(); },
             '#prev-btn': () => fetch('/previous_step', { method: 'POST' }),
             '#next-step-btn': () => fetch('/next_step', { method: 'POST' }),
             '#add-10s-btn': () => fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: 10}) }),
             '#subtract-10s-btn': () => fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: -10}) })
         };
         for (const selector in actionMap) {
-            if (target.closest(selector)) {
-                actionMap[selector](); break;
+            const closestEl = target.closest(selector);
+            if (closestEl) {
+                actionMap[selector](closestEl); break;
             }
         }
     });
 
     document.addEventListener('keydown', (e) => {
+        if (e.target.matches('input, select')) return;
         const mode = sessionStorage.getItem('current_mode');
         if (!mode) return;
         const actionMap = {
-            ' ': () => fetch('/toggle_timer', { method: 'POST' }),
-            'ArrowUp': () => fetch('/previous_step', { method: 'POST' }),
-            'ArrowDown': () => fetch('/next_step', { method: 'POST' }),
-            'ArrowLeft': () => fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: -10}) }),
-            'ArrowRight': () => fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: 10}) })
+            ' ': '/toggle_timer', 'ArrowUp': '/previous_step', 'ArrowDown': '/next_step'
         };
-        if (actionMap[e.key] && !e.target.matches('input, select')) { 
-            e.preventDefault(); 
-            actionMap[e.key](); 
+        const timeAdjustMap = {
+            'ArrowLeft': -10, 'ArrowRight': 10
+        }
+        if (actionMap[e.key]) { 
+            e.preventDefault();
+            fetch(actionMap[e.key], { method: 'POST' });
+        } else if (timeAdjustMap[e.key]) {
+            e.preventDefault();
+            fetch('/adjust_time', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({seconds: timeAdjustMap[e.key]}) });
         }
     });
 });

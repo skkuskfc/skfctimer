@@ -11,21 +11,19 @@ from openpyxl import Workbook
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
 
-# --- Render Disk 데이터 파일 경로 정의 ---
+# --- 데이터 파일 경로 정의 ---
 DISK_PATH = '/var/data'
 if not os.path.exists(DISK_PATH):
     os.makedirs(DISK_PATH)
 
-ATTENDEES_TODAY = []
 USED_TOKENS = set()
 ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
 USERS_FILE = os.path.join(DISK_PATH, 'users.json')
-# 2. 부원 명단 및 기수 관리를 위한 파일 경로 추가
 COHORTS_FILE = os.path.join(DISK_PATH, 'cohorts.json')
 ROSTER_FILE = os.path.join(DISK_PATH, 'roster.json')
 
 
-# 타이머 데이터
+# --- 타이머 데이터 ---
 CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'], 'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2], 'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0] }
 FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 1, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
@@ -45,9 +43,8 @@ def save_json_file(data, filename):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-# --- 새로운 헬퍼 함수 ---
+# --- 헬퍼 함수 ---
 def get_current_cohort():
-    """ 현재 날짜를 기준으로 활동 중인 기수를 반환합니다. """
     cohorts = load_json_file(COHORTS_FILE)
     today = datetime.now().date()
     for cohort_id, info in cohorts.items():
@@ -60,7 +57,6 @@ def get_current_cohort():
             continue
     return None
 
-# --- 기존 헬퍼 함수들 ---
 def formalize(sec): sec = int(sec); return f"{sec//60:02d}:{sec%60:02d}"
 def get_remain_time(runtime_sec, timestamp):
     elapse = 0
@@ -87,7 +83,7 @@ def perform_turn_switch(state):
 
 # --- 라우트 (API) ---
 
-# 로그인/회원가입 라우트
+# 로그인/회원가입/메인
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -139,23 +135,16 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# 메인 앱 라우트 (로그인 필요)
 @app.route('/')
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     return render_template('index.html')
 
-# --- 출석 및 신규 관리 라우트 ---
+# --- 출석 관리 로직 ---
 @app.route('/start_attendance', methods=['POST'])
 def start_attendance():
-    global ATTENDEES_TODAY, USED_TOKENS
-    USED_TOKENS.clear()
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    log = load_json_file(ATTENDANCE_FILE)
-    raw_list = log.get(today_str, [])
-    sanitized_list = [item for item in raw_list if isinstance(item, dict) and 'name' in item and 'type' in item]
-    ATTENDEES_TODAY = sanitized_list
+    global USED_TOKENS; USED_TOKENS.clear()
     return jsonify({'status': 'attendance started'})
 
 @app.route('/qrcode')
@@ -163,12 +152,9 @@ def qr_code():
     token = int(time.time() / 10)
     url = url_for('check_in_page', token=token, _external=True)
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-    qr.add_data(url)
-    qr.make(fit=True)
+    qr.add_data(url); qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf)
-    buf.seek(0)
+    buf = io.BytesIO(); img.save(buf); buf.seek(0)
     return send_file(buf, mimetype='image/png')
 
 @app.route('/check_in')
@@ -188,38 +174,46 @@ def check_in_page():
 
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
-    global ATTENDEES_TODAY, USED_TOKENS
+    global USED_TOKENS
     token = session.get('attendance_token')
-    if token is None:
-        return "<h1>잘못된 접근입니다. QR코드를 통해 다시 시도해주세요.</h1>", 400
-    if token in USED_TOKENS:
-        return "<h1>이미 출석체크를 완료했습니다. 이 창을 닫아주세요.</h1>", 400
+    if token is None: return "<h1>잘못된 접근입니다. QR코드를 통해 다시 시도해주세요.</h1>", 400
+    if token in USED_TOKENS: return "<h1>이미 출석체크를 완료했습니다. 이 창을 닫아주세요.</h1>", 400
+
     name = request.form.get('name', '').strip()
     member_type = request.form.get('member_type', '기타')
+
     if name and member_type:
-        new_attendee = {'name': name, 'type': member_type, 'status': '출석'}
         today_str = datetime.now().strftime('%Y-%m-%d')
         log = load_json_file(ATTENDANCE_FILE)
-        if today_str not in log:
-            log[today_str] = []
-        if any(a['name'] == name for a in log[today_str]):
-            return f"<h1>'{name}'님은 이미 출석 명단에 있습니다.</h1><p>이 창을 닫아주세요.</p>"
-        log[today_str].append(new_attendee)
-        if not any(a['name'] == name for a in ATTENDEES_TODAY):
-            ATTENDEES_TODAY.append(new_attendee)
+        
+        if today_str not in log: log[today_str] = []
+        
+        member_found = False
+        for member in log[today_str]:
+            if member['name'] == name:
+                member['status'] = '출석'
+                member_found = True
+                break
+        
+        if not member_found:
+            log[today_str].append({'name': name, 'type': member_type, 'status': '출석'})
+
         save_json_file(log, ATTENDANCE_FILE)
         USED_TOKENS.add(token)
         session.pop('attendance_token', None)
         return "<h1>출석이 완료되었습니다.</h1><p>이 창을 닫아주세요.</p>"
+    
     return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
 
-@app.route('/get_attendees')
-def get_attendees():
-    global ATTENDEES_TODAY
-    return jsonify({'attendees': ATTENDEES_TODAY})
+@app.route('/api/todays_attendance')
+def get_todays_attendance():
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    log = load_json_file(ATTENDANCE_FILE)
+    attendees = log.get(today_str, [])
+    return jsonify({'attendees': attendees})
 
-@app.route('/api/load_current_roster', methods=['GET'])
-def load_current_roster():
+@app.route('/api/initialize_attendance_with_roster', methods=['POST'])
+def initialize_attendance_with_roster():
     current_cohort_id = get_current_cohort()
     if not current_cohort_id:
         return jsonify({'error': '현재 활동 중인 기수 정보가 없습니다. 기수 관리 탭에서 활동 기간을 설정해주세요.'}), 404
@@ -227,45 +221,38 @@ def load_current_roster():
     rosters = load_json_file(ROSTER_FILE)
     roster_list = rosters.get(current_cohort_id, [])
     
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    attendance_log = load_json_file(ATTENDANCE_FILE)
-    todays_attendees = attendance_log.get(today_str, [])
-    
-    checked_in_names = {a['name'] for a in todays_attendees}
-    
-    for member in roster_list:
-        if member['name'] in checked_in_names:
-            member['attendance_status'] = '출석'
-        else:
-            member['attendance_status'] = '결석'
-            
-    return jsonify({'cohort_id': current_cohort_id, 'roster': roster_list})
+    if not roster_list:
+        return jsonify({'error': f'{current_cohort_id} 명단이 비어있습니다. 부원 명단 관리 탭에서 명단을 추가해주세요.'}), 404
 
+    initial_attendance = []
+    for member in roster_list:
+        initial_attendance.append({
+            'name': member.get('name'),
+            'type': member.get('activity_type'),
+            'status': '결석'
+        })
+
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    log = load_json_file(ATTENDANCE_FILE)
+    log[today_str] = initial_attendance
+    save_json_file(log, ATTENDANCE_FILE)
+            
+    return jsonify({'attendees': initial_attendance})
+
+# --- 출석 기록 및 명단 관리 ---
 @app.route('/api/update_attendance_status', methods=['POST'])
 def update_attendance_status():
     data = request.json
-    date_str = data.get('date')
-    name = data.get('name')
-    new_status = data.get('status')
-
-    if not all([date_str, name, new_status]):
-        return jsonify({'error': '필수 정보가 누락되었습니다.'}), 400
+    date_str, name, new_status = data.get('date'), data.get('name'), data.get('status')
+    if not all([date_str, name, new_status]): return jsonify({'error': '필수 정보가 누락되었습니다.'}), 400
 
     log = load_json_file(ATTENDANCE_FILE)
     if date_str in log:
-        found = False
         for attendee in log[date_str]:
             if attendee['name'] == name:
                 attendee['status'] = new_status
-                found = True
-                break
-        if not found: # 명단에 없는 사람 상태 변경 시 (예: 결석->지각)
-             # 이 경우, 부원 명단에서 정보를 찾아 추가해야 하지만, 일단 단순화를 위해 기존 출석자만 변경
-             pass
-        
-        save_json_file(log, ATTENDANCE_FILE)
-        return jsonify({'status': 'success'})
-
+                save_json_file(log, ATTENDANCE_FILE)
+                return jsonify({'status': 'success'})
     return jsonify({'error': '해당 날짜 또는 참석자를 찾을 수 없습니다.'}), 404
 
 @app.route('/get_history_by_date')
@@ -275,8 +262,7 @@ def get_history_by_date():
     log = load_json_file(ATTENDANCE_FILE)
     attendees = log.get(date_str, [])
     for attendee in attendees:
-        if 'status' not in attendee:
-            attendee['status'] = '출석' 
+        if 'status' not in attendee: attendee['status'] = '출석' 
     return jsonify({'attendees': attendees})
 
 @app.route('/reset_attendance_by_date', methods=['POST'])
@@ -287,8 +273,6 @@ def reset_attendance_by_date():
     if date_str in log:
         del log[date_str]
         save_json_file(log, ATTENDANCE_FILE)
-    if date_str == datetime.now().strftime('%Y-%m-%d'):
-        global ATTENDEES_TODAY; ATTENDEES_TODAY = []
     return jsonify({'status': f'{date_str} attendance reset'})
 
 @app.route('/export_excel')
@@ -301,73 +285,51 @@ def export_excel():
     
     try:
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-        month_str = date_obj.strftime('%m월')
-        day_str = date_obj.strftime('%d일')
-        filename = f"{cohort_str}_{month_str}_{day_str}_출석부.xlsx"
+        filename = f"{cohort_str}_{date_obj.strftime('%m월_%d일')}_출석부.xlsx"
     except ValueError:
         filename = f"attendance_{date_str}.xlsx"
 
     log = load_json_file(ATTENDANCE_FILE)
     attendees = log.get(date_str, [])
     
-    wb = Workbook()
-    ws = wb.active
-    ws.title = date_str
+    wb = Workbook(); ws = wb.active; ws.title = date_str
     ws.append(['이름', '부원 구분', '출석 상태'])
-
+    present_count = 0
     for attendee in attendees:
-        ws.append([
-            attendee.get('name', ''), 
-            attendee.get('type', ''),
-            attendee.get('status', '출석')
-        ])
+        status = attendee.get('status', '출석')
+        if status == '출석':
+            present_count += 1
+        ws.append([attendee.get('name', ''), attendee.get('type', ''), status])
     
-    ws.append([])
-    ws.append([f"해당 일자 출석 인원: {len(attendees)}명"])
+    ws.append([]); ws.append([f"해당 일자 출석 인원: {present_count}명"])
 
-    excel_buffer = io.BytesIO()
-    wb.save(excel_buffer)
-    excel_buffer.seek(0)
-    
+    excel_buffer = io.BytesIO(); wb.save(excel_buffer); excel_buffer.seek(0)
     return send_file(excel_buffer, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-# --- 부원 명단/기수 관리 API ---
 @app.route('/api/cohorts', methods=['GET', 'POST'])
 def manage_cohorts():
     if request.method == 'GET':
-        cohorts = load_json_file(COHORTS_FILE)
-        return jsonify(cohorts)
-    
+        return jsonify(load_json_file(COHORTS_FILE))
     if request.method == 'POST':
         data = request.json
         cohort_id = data.get('cohort_id')
-        if not cohort_id:
-            return jsonify({'error': '기수 정보가 필요합니다.'}), 400
-        
+        if not cohort_id: return jsonify({'error': '기수 정보가 필요합니다.'}), 400
         cohorts = load_json_file(COHORTS_FILE)
-        cohorts[cohort_id] = {
-            'start_date': data.get('start_date'),
-            'end_date': data.get('end_date'),
-            'president': data.get('president')
-        }
+        cohorts[cohort_id] = {'start_date': data.get('start_date'), 'end_date': data.get('end_date'), 'president': data.get('president')}
         save_json_file(cohorts, COHORTS_FILE)
         return jsonify({'status': 'success', 'cohort': cohorts[cohort_id]})
 
 @app.route('/api/roster/<cohort_id>', methods=['GET', 'POST'])
 def manage_roster(cohort_id):
     rosters = load_json_file(ROSTER_FILE)
-    
     if request.method == 'GET':
-        roster_list = rosters.get(cohort_id, [])
-        return jsonify(roster_list)
-        
+        return jsonify(rosters.get(cohort_id, []))
     if request.method == 'POST':
-        roster_data = request.json.get('roster', [])
-        rosters[cohort_id] = roster_data
+        rosters[cohort_id] = request.json.get('roster', [])
         save_json_file(rosters, ROSTER_FILE)
         return jsonify({'status': 'success'})
 
-# --- 타이머 라우트 ---
+# --- 타이머 라우트 (변경 없음) ---
 @app.route('/start_ceda_timer', methods=['POST'])
 def start_ceda_timer():
     session['mode'] = 'ceda'; session['step'] = 0; setup_step()
@@ -394,10 +356,9 @@ def set_custom_time():
 
 @app.route('/toggle_timer', methods=['POST'])
 def toggle_timer():
-    data = get_current_data()
+    data = get_current_data();
     if not data: return jsonify({'status': 'error'}), 400
-    state = session.get('timer_state', {})
-    step = session.get('step', 0); step_type = data['pc'][step]
+    state = session.get('timer_state', {}); step = session.get('step', 0); step_type = data['pc'][step]
     if step_type == 2:
         turn = state.get('turn', 'pros'); ts_key = f"{turn}_timestamp"; timestamp = state.get(ts_key, [])
         if is_running(timestamp): timestamp.append(time.time())
@@ -447,10 +408,8 @@ def set_step():
 def adjust_time():
     data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
-    req_data = request.get_json()
-    seconds = req_data.get('seconds', 0)
-    state = session.get('timer_state', {})
-    step_type = data['pc'][session.get('step', 0)]
+    req_data = request.get_json(); seconds = req_data.get('seconds', 0)
+    state = session.get('timer_state', {}); step_type = data['pc'][session.get('step', 0)]
     if step_type == 2:
         turn = state.get('turn', 'pros'); main_ts_key = f"{turn}_timestamp"; main_ts = state.get(main_ts_key, [])
         runtime_sec = state.get('runtime', 0); current_main_remain = get_remain_time(runtime_sec, main_ts)
@@ -473,15 +432,13 @@ def adjust_time():
 
 @app.route('/status')
 def status():
-    mode = session.get('mode')
-    data = get_current_data()
+    mode = session.get('mode'); data = get_current_data()
     if not data: return jsonify({'active': False})
     step = session.get('step', 0); state = session.get('timer_state', {}); step_type = data['pc'][step]
     response = {'active': True, 'mode': mode, 'step': step, 'step_name': data['names'][step], 'timeline': data}
     if step_type == 2:
         turn_ts = state.get('turn_timestamp', []); turn_remain_sec = get_remain_time(120, turn_ts)
-        if turn_remain_sec <= 0 and is_running(turn_ts):
-            state = perform_turn_switch(state); session['timer_state'] = state
+        if turn_remain_sec <= 0 and is_running(turn_ts): state = perform_turn_switch(state); session['timer_state'] = state
         runtime_sec = state.get('runtime', 0)
         pros_ts = state.get('pros_timestamp', []); cons_ts = state.get('cons_timestamp', [])
         turn = state.get('turn', 'pros'); pros_remain_sec = get_remain_time(runtime_sec, pros_ts); cons_remain_sec = get_remain_time(runtime_sec, cons_ts)
