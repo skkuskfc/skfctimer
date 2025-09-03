@@ -4,6 +4,7 @@ import qrcode
 import json
 import os
 from datetime import datetime, timezone, timedelta
+from functools import wraps
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
@@ -21,10 +22,16 @@ ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
 USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 COHORTS_FILE = os.path.join(DISK_PATH, 'cohorts.json')
 ROSTER_FILE = os.path.join(DISK_PATH, 'roster.json')
+PERMISSIONS_FILE = os.path.join(DISK_PATH, 'permissions.json')
 
-# KST 타임존 정의
 KST = timezone(timedelta(hours=9))
 
+# 전체 기능 목록 정의
+FEATURES = {
+    'attendance': '출석 관리', 'history': '출석 기록', 'member-roster': '부원 명단 관리',
+    'ceda-timer': '복합 CEDA 타이머', 'free-timer': '자유토론 타이머', 'general-timer': '일반 타이머',
+    'access-management': '웹 권한 관리'
+}
 
 # --- 타이머 데이터 ---
 CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'], 'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2], 'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0] }
@@ -32,21 +39,20 @@ FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '�
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
 
 # --- 파일 관리 함수 ---
-def load_json_file(filename):
+def load_json_file(filename, default_data={}):
     try:
         if not os.path.exists(filename) or os.path.getsize(filename) == 0:
-            return {}
+            return default_data
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        return default_data
 
 def save_json_file(data, filename):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-
-# --- 헬퍼 함수 ---
+# --- 헬퍼 함수 및 데코레이터 ---
 def get_current_cohort():
     cohorts = load_json_file(COHORTS_FILE)
     today = datetime.now().date()
@@ -59,6 +65,23 @@ def get_current_cohort():
         except (ValueError, KeyError):
             continue
     return None
+
+def permission_required(feature):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            permissions = session.get('permissions', [])
+            if feature not in permissions:
+                return jsonify({'error': '접근 권한이 없습니다.'}), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def check_current_timer_permission():
+    mode = session.get('mode')
+    if not mode: return False
+    required_permission = {'ceda': 'ceda-timer', 'free_debate': 'free-timer', 'general': 'general-timer'}.get(mode)
+    return required_permission and required_permission in session.get('permissions', [])
 
 def formalize(sec): sec = int(sec); return f"{sec//60:02d}:{sec%60:02d}"
 def get_remain_time(runtime_sec, timestamp):
@@ -95,9 +118,18 @@ def login():
         users = load_json_file(USERS_FILE)
         user_data = users.get(user_id)
         if user_data and check_password_hash(user_data['password_hash'], password):
+            session.clear()
             session['user_id'] = user_id
             session['user_name'] = user_data['name']
-            session['member_type'] = user_data.get('member_type', '정보 없음')
+            member_type = user_data.get('member_type', '정보 없음')
+            session['member_type'] = member_type
+
+            permissions_data = load_json_file(PERMISSIONS_FILE, default_data={})
+            if member_type == '회장':
+                session['permissions'] = list(FEATURES.keys())
+            else:
+                session['permissions'] = permissions_data.get(member_type, [])
+            
             return redirect(url_for('index'))
         else:
             flash('아이디 또는 비밀번호가 올바르지 않습니다.')
@@ -133,6 +165,7 @@ def signup():
             return redirect(url_for('login'))
     return render_template('signup.html')
 
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -142,16 +175,20 @@ def logout():
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    return render_template('index.html')
+    accessible_pages = {key: FEATURES[key] for key in session.get('permissions', []) if key in FEATURES}
+    return render_template('index.html', accessible_pages=accessible_pages)
 
 # --- 출석 관리 로직 ---
 @app.route('/start_attendance', methods=['POST'])
+@permission_required('attendance')
 def start_attendance():
     global USED_TOKENS; USED_TOKENS.clear()
     return jsonify({'status': 'attendance started'})
 
 @app.route('/qrcode')
 def qr_code():
+    if 'attendance' not in session.get('permissions', []):
+        return "접근 권한이 없습니다.", 403
     token = int(time.time() / 10)
     url = url_for('check_in_page', token=token, _external=True)
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
@@ -175,7 +212,6 @@ def check_in_page():
     session['attendance_token'] = received_token
     return render_template('check_in.html')
 
-# MODIFIED: Bug fix in time comparison logic
 @app.route('/submit_name', methods=['POST'])
 def submit_name():
     global USED_TOKENS
@@ -193,23 +229,17 @@ def submit_name():
         
         today_log_entry = log.get(today_str)
         if isinstance(today_log_entry, list):
-            attendees = today_log_entry
-            settings = {'cutoff_time': '18:00'}
+            attendees, settings = today_log_entry, {'cutoff_time': '18:00'}
         elif isinstance(today_log_entry, dict):
-            attendees = today_log_entry.get('attendees', [])
-            settings = today_log_entry.get('settings', {'cutoff_time': '18:00'})
+            attendees, settings = today_log_entry.get('attendees', []), today_log_entry.get('settings', {'cutoff_time': '18:00'})
         else:
-            attendees = []
-            settings = {'cutoff_time': '18:00'}
+            attendees, settings = [], {'cutoff_time': '18:00'}
 
         cutoff_time_str = settings.get('cutoff_time', '18:00')
         
-        # --- MODIFIED LOGIC START ---
-        # 마감 시간을 해당 분의 마지막 초로 설정 (예: 18:36 -> 18:36:59)
         naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
         effective_cutoff = naive_cutoff + timedelta(seconds=59)
         cutoff_datetime = effective_cutoff.replace(tzinfo=KST)
-        # --- MODIFIED LOGIC END ---
 
         status = '출석' if check_in_time <= cutoff_datetime else '지각'
         timestamp_str = check_in_time.strftime('%H:%M:%S')
@@ -234,44 +264,33 @@ def submit_name():
     return "<h1>이름과 부원 구분을 모두 선택해주세요.</h1>", 400
 
 @app.route('/api/todays_attendance')
+@permission_required('attendance')
 def get_todays_attendance():
     today_str = datetime.now(KST).strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
     today_log_entry = log.get(today_str)
-
     if isinstance(today_log_entry, list):
-        attendees = today_log_entry
-        settings = {'cutoff_time': '18:00'}
+        attendees, settings = today_log_entry, {'cutoff_time': '18:00'}
     elif isinstance(today_log_entry, dict):
-        attendees = today_log_entry.get('attendees', [])
-        settings = today_log_entry.get('settings', {'cutoff_time': '18:00'})
+        attendees, settings = today_log_entry.get('attendees', []), today_log_entry.get('settings', {'cutoff_time': '18:00'})
     else:
-        attendees = []
-        settings = {'cutoff_time': '18:00'}
-    
+        attendees, settings = [], {'cutoff_time': '18:00'}
     return jsonify({'attendees': attendees, 'settings': settings})
 
 @app.route('/api/initialize_attendance_with_roster', methods=['POST'])
+@permission_required('attendance')
 def initialize_attendance_with_roster():
     current_cohort_id = get_current_cohort()
     if not current_cohort_id:
-        return jsonify({'error': '현재 활동 중인 기수 정보가 없습니다. 기수 관리 탭에서 활동 기간을 설정해주세요.'}), 404
+        return jsonify({'error': '현재 활동 중인 기수 정보가 없습니다.'}), 404
     
     rosters = load_json_file(ROSTER_FILE)
     roster_list = rosters.get(current_cohort_id, [])
     
     if not roster_list:
-        return jsonify({'error': f'{current_cohort_id} 명단이 비어있습니다. 부원 명단 관리 탭에서 명단을 추가해주세요.'}), 404
+        return jsonify({'error': f'{current_cohort_id} 명단이 비어있습니다.'}), 404
 
-    initial_attendance = []
-    for member in roster_list:
-        initial_attendance.append({
-            'name': member.get('name'),
-            'type': member.get('activity_type'),
-            'status': '결석',
-            'timestamp': ''
-        })
-
+    initial_attendance = [{'name': m.get('name'), 'type': m.get('activity_type'), 'status': '결석', 'timestamp': ''} for m in roster_list]
     today_str = datetime.now(KST).strftime('%Y-%m-%d')
     log = load_json_file(ATTENDANCE_FILE)
     
@@ -281,57 +300,40 @@ def initialize_attendance_with_roster():
     else:
         existing_settings = {'cutoff_time': '18:00'}
     
-    log[today_str] = {
-        'attendees': initial_attendance,
-        'settings': existing_settings
-    }
+    log[today_str] = {'attendees': initial_attendance, 'settings': existing_settings}
     save_json_file(log, ATTENDANCE_FILE)
-            
-    return jsonify({
-        'attendees': initial_attendance,
-        'settings': existing_settings
-    })
+    return jsonify({'attendees': initial_attendance, 'settings': existing_settings})
 
-# --- 출석 기록 및 명단 관리 ---
 @app.route('/api/set_cutoff_time', methods=['POST'])
+@permission_required('attendance')
 def set_cutoff_time():
     data = request.json
-    date_str = data.get('date')
-    cutoff_time = data.get('cutoff_time')
-    if not date_str or not cutoff_time:
-        return jsonify({'error': 'Date and cutoff time are required'}), 400
-
+    date_str, cutoff_time = data.get('date'), data.get('cutoff_time')
+    if not date_str or not cutoff_time: return jsonify({'error': 'Date and cutoff time are required'}), 400
     log = load_json_file(ATTENDANCE_FILE)
     if date_str not in log or isinstance(log.get(date_str), list):
         log[date_str] = {'settings': {}, 'attendees': []}
-    
     log[date_str]['settings'] = {'cutoff_time': cutoff_time}
     save_json_file(log, ATTENDANCE_FILE)
     return jsonify({'status': 'success'})
 
 @app.route('/api/update_attendance_status', methods=['POST'])
+@permission_required('history')
 def update_attendance_status():
     data = request.json
     date_str, name, new_status = data.get('date'), data.get('name'), data.get('status')
     if not all([date_str, name, new_status]): return jsonify({'error': '필수 정보가 누락되었습니다.'}), 400
-
     log = load_json_file(ATTENDANCE_FILE)
     date_log_entry = log.get(date_str)
     if not date_log_entry: return jsonify({'error': '해당 날짜를 찾을 수 없습니다.'}), 404
 
-    if isinstance(date_log_entry, list):
-        attendees = date_log_entry
-        settings = {}
-    else: # Is a dict
-        attendees = date_log_entry.get('attendees', [])
-        settings = date_log_entry.get('settings', {})
-
+    attendees, settings = (date_log_entry, {}) if isinstance(date_log_entry, list) else (date_log_entry.get('attendees', []), date_log_entry.get('settings', {}))
+    
     member_found = False
     for attendee in attendees:
         if attendee['name'] == name:
             attendee['status'] = new_status
-            if new_status == '결석':
-                attendee['timestamp'] = ''
+            if new_status == '결석': attendee['timestamp'] = ''
             member_found = True
             break
     
@@ -339,29 +341,23 @@ def update_attendance_status():
         log[date_str] = {'settings': settings, 'attendees': attendees}
         save_json_file(log, ATTENDANCE_FILE)
         return jsonify({'status': 'success'})
-
     return jsonify({'error': '해당 참석자를 찾을 수 없습니다.'}), 404
 
 @app.route('/get_history_by_date')
+@permission_required('history')
 def get_history_by_date():
     date_str = request.args.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
     log = load_json_file(ATTENDANCE_FILE)
     date_log_entry = log.get(date_str)
-
-    if isinstance(date_log_entry, list):
-        attendees = date_log_entry
-    elif isinstance(date_log_entry, dict):
-        attendees = date_log_entry.get('attendees', [])
-    else:
-        attendees = []
-
+    attendees = date_log_entry if isinstance(date_log_entry, list) else (date_log_entry.get('attendees', []) if isinstance(date_log_entry, dict) else [])
     for attendee in attendees:
-        if 'status' not in attendee: attendee['status'] = '출석' 
-        if 'timestamp' not in attendee: attendee['timestamp'] = ''
+        attendee.setdefault('status', '출석')
+        attendee.setdefault('timestamp', '')
     return jsonify({'attendees': attendees})
 
 @app.route('/reset_attendance_by_date', methods=['POST'])
+@permission_required('history')
 def reset_attendance_by_date():
     date_str = request.json.get('date')
     if not date_str: return jsonify({'error': 'Date parameter is required'}), 400
@@ -372,105 +368,128 @@ def reset_attendance_by_date():
     return jsonify({'status': f'{date_str} attendance reset'})
 
 @app.route('/export_excel')
+@permission_required('history')
 def export_excel():
     date_str = request.args.get('date')
     if not date_str: return "Date not provided", 400
-    
     current_cohort = get_current_cohort()
     cohort_str = f"{current_cohort}" if current_cohort else "알수없음"
-    
     try:
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         filename = f"{cohort_str}_{date_obj.strftime('%m월_%d일')}_출석부.xlsx"
     except ValueError:
         filename = f"attendance_{date_str}.xlsx"
-
     log = load_json_file(ATTENDANCE_FILE)
     date_log_entry = log.get(date_str)
-
-    if isinstance(date_log_entry, list):
-        attendees = date_log_entry
-    elif isinstance(date_log_entry, dict):
-        attendees = date_log_entry.get('attendees', [])
-    else:
-        attendees = []
-    
+    attendees = date_log_entry if isinstance(date_log_entry, list) else (date_log_entry.get('attendees', []) if isinstance(date_log_entry, dict) else [])
     wb = Workbook(); ws = wb.active; ws.title = date_str
     ws.append(['이름', '부원 구분', '출석 상태', '출석 시간'])
-    present_count = 0
-    late_count = 0
+    present_count = 0; late_count = 0
     for attendee in attendees:
         status = attendee.get('status', '출석')
-        if status == '출석':
-            present_count += 1
-        elif status == '지각':
-            late_count +=1
-        ws.append([
-            attendee.get('name', ''), 
-            attendee.get('type', ''), 
-            status,
-            attendee.get('timestamp', '')
-        ])
-    
+        if status == '출석': present_count += 1
+        elif status == '지각': late_count +=1
+        ws.append([attendee.get('name', ''), attendee.get('type', ''), status, attendee.get('timestamp', '')])
     ws.append([])
     total_attended = present_count + late_count
     ws.append([f"총원: {len(attendees)}명"])
     ws.append([f"참석: {total_attended}명 (출석: {present_count}명, 지각: {late_count}명)"])
-
     excel_buffer = io.BytesIO(); wb.save(excel_buffer); excel_buffer.seek(0)
     return send_file(excel_buffer, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 @app.route('/api/cohorts', methods=['GET', 'POST'])
+@permission_required('member-roster')
 def manage_cohorts():
     if request.method == 'GET':
         return jsonify(load_json_file(COHORTS_FILE))
-    if request.method == 'POST':
-        data = request.json
-        cohort_id = data.get('cohort_id')
-        if not cohort_id: return jsonify({'error': '기수 정보가 필요합니다.'}), 400
-        cohorts = load_json_file(COHORTS_FILE)
-        cohorts[cohort_id] = {'start_date': data.get('start_date'), 'end_date': data.get('end_date'), 'president': data.get('president')}
-        save_json_file(cohorts, COHORTS_FILE)
-        return jsonify({'status': 'success', 'cohort': cohorts[cohort_id]})
+    data = request.json
+    cohort_id = data.get('cohort_id')
+    if not cohort_id: return jsonify({'error': '기수 정보가 필요합니다.'}), 400
+    cohorts = load_json_file(COHORTS_FILE)
+    cohorts[cohort_id] = {'start_date': data.get('start_date'), 'end_date': data.get('end_date'), 'president': data.get('president')}
+    save_json_file(cohorts, COHORTS_FILE)
+    return jsonify({'status': 'success', 'cohort': cohorts[cohort_id]})
 
 @app.route('/api/roster/<cohort_id>', methods=['GET', 'POST'])
+@permission_required('member-roster')
 def manage_roster(cohort_id):
     rosters = load_json_file(ROSTER_FILE)
     if request.method == 'GET':
         return jsonify(rosters.get(cohort_id, []))
-    if request.method == 'POST':
-        rosters[cohort_id] = request.json.get('roster', [])
-        save_json_file(rosters, ROSTER_FILE)
-        return jsonify({'status': 'success'})
+    rosters[cohort_id] = request.json.get('roster', [])
+    save_json_file(rosters, ROSTER_FILE)
+    return jsonify({'status': 'success'})
 
-# --- 타이머 라우트 (변경 없음) ---
+# --- 웹 권한 관리 API ---
+@app.route('/api/access_data')
+@permission_required('access-management')
+def get_access_data():
+    users = load_json_file(USERS_FILE)
+    member_types = sorted(list(set(u.get('member_type') for u in users.values() if u.get('member_type') and u.get('member_type') != '회장')))
+    editable_features = {k: v for k, v in FEATURES.items() if k != 'access-management'}
+    permissions = load_json_file(PERMISSIONS_FILE, default_data={})
+    return jsonify({'member_types': member_types, 'features': editable_features, 'permissions': permissions})
+
+@app.route('/api/permissions', methods=['POST'])
+@permission_required('access-management')
+def save_permissions():
+    new_permissions = request.json
+    save_json_file(new_permissions, PERMISSIONS_FILE)
+    return jsonify({'status': 'success'})
+
+@app.route('/api/users')
+@permission_required('access-management')
+def get_users():
+    users = load_json_file(USERS_FILE)
+    user_list = [{'id': uid, 'name': u.get('name'), 'cohort': u.get('cohort'), 'member_type': u.get('member_type')} for uid, u in users.items()]
+    return jsonify(user_list)
+
+@app.route('/api/delete_user', methods=['POST'])
+@permission_required('access-management')
+def delete_user():
+    user_id_to_delete = request.json.get('user_id')
+    if not user_id_to_delete: return jsonify({'error': 'User ID is required'}), 400
+    users = load_json_file(USERS_FILE)
+    if user_id_to_delete in users:
+        if users[user_id_to_delete].get('member_type') == '회장':
+            return jsonify({'error': '회장 계정은 삭제할 수 없습니다.'}), 403
+        del users[user_id_to_delete]
+        save_json_file(users, USERS_FILE)
+        return jsonify({'status': 'success'})
+    return jsonify({'error': 'User not found'}), 404
+
+# --- 타이머 라우트 ---
 @app.route('/start_ceda_timer', methods=['POST'])
+@permission_required('ceda-timer')
 def start_ceda_timer():
     session['mode'] = 'ceda'; session['step'] = 0; setup_step()
     return jsonify({'status': 'CEDA timer initialized'})
 
 @app.route('/start_free_timer', methods=['POST'])
+@permission_required('free-timer')
 def start_free_timer():
     session['mode'] = 'free_debate'; session['step'] = 0; setup_step()
     return jsonify({'status': 'Free debate timer initialized'})
 
 @app.route('/start_general_timer', methods=['POST'])
+@permission_required('general-timer')
 def start_general_timer():
     session['mode'] = 'general'; session['step'] = 0; setup_step()
     return jsonify({'status': 'General timer initialized'})
 
 @app.route('/set_custom_time', methods=['POST'])
+@permission_required('general-timer')
 def set_custom_time():
-    if session.get('mode') != 'general': return jsonify({'status': 'invalid mode'}), 400
     req_data = request.get_json()
-    minutes = int(req_data.get('minutes', 0)); seconds = int(req_data.get('seconds', 0))
+    minutes, seconds = int(req_data.get('minutes', 0)), int(req_data.get('seconds', 0))
     session['step'] = len(GENERAL_TIMER_DATA['names']) - 1
     session['timer_state'] = { 'runtime': minutes * 60 + seconds, 'timestamp': [] }
     return jsonify({'status': 'custom time set'})
 
 @app.route('/toggle_timer', methods=['POST'])
 def toggle_timer():
-    data = get_current_data();
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
+    data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
     state = session.get('timer_state', {}); step = session.get('step', 0); step_type = data['pc'][step]
     if step_type == 2:
@@ -492,11 +511,13 @@ def toggle_timer():
 
 @app.route('/switch_turn', methods=['POST'])
 def switch_turn():
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
     state = session.get('timer_state', {}); state = perform_turn_switch(state); session['timer_state'] = state
     return jsonify({'status': 'turn switched'})
 
 @app.route('/next_step', methods=['POST'])
 def next_step():
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
     data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
     session['step'] = min(session.get('step', 0) + 1, len(data['names']) - 1); setup_step()
@@ -504,15 +525,16 @@ def next_step():
 
 @app.route('/previous_step', methods=['POST'])
 def previous_step():
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
     session['step'] = max(session.get('step', 0) - 1, 0); setup_step()
     return jsonify({'status': 'previous step'})
 
 @app.route('/set_step', methods=['POST'])
 def set_step():
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
     data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
-    req_data = request.get_json()
-    new_step = req_data.get('step')
+    new_step = request.get_json().get('step')
     if new_step is not None and 0 <= new_step < len(data['names']):
         session['step'] = new_step; setup_step()
         return jsonify({'status': f'step set to {new_step}'})
@@ -520,9 +542,10 @@ def set_step():
 
 @app.route('/adjust_time', methods=['POST'])
 def adjust_time():
+    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
     data = get_current_data()
     if not data: return jsonify({'status': 'error'}), 400
-    req_data = request.get_json(); seconds = req_data.get('seconds', 0)
+    seconds = request.get_json().get('seconds', 0)
     state = session.get('timer_state', {}); step_type = data['pc'][session.get('step', 0)]
     if step_type == 2:
         turn = state.get('turn', 'pros'); main_ts_key = f"{turn}_timestamp"; main_ts = state.get(main_ts_key, [])
@@ -546,6 +569,7 @@ def adjust_time():
 
 @app.route('/status')
 def status():
+    if not check_current_timer_permission(): return jsonify({'active': False, 'error': '접근 권한이 없습니다.'}), 403
     mode = session.get('mode'); data = get_current_data()
     if not data: return jsonify({'active': False})
     step = session.get('step', 0); state = session.get('timer_state', {}); step_type = data['pc'][step]
@@ -554,8 +578,8 @@ def status():
         turn_ts = state.get('turn_timestamp', []); turn_remain_sec = get_remain_time(120, turn_ts)
         if turn_remain_sec <= 0 and is_running(turn_ts): state = perform_turn_switch(state); session['timer_state'] = state
         runtime_sec = state.get('runtime', 0)
-        pros_ts = state.get('pros_timestamp', []); cons_ts = state.get('cons_timestamp', [])
-        turn = state.get('turn', 'pros'); pros_remain_sec = get_remain_time(runtime_sec, pros_ts); cons_remain_sec = get_remain_time(runtime_sec, cons_ts)
+        pros_ts, cons_ts = state.get('pros_timestamp', []), state.get('cons_timestamp', [])
+        turn = state.get('turn', 'pros'); pros_remain_sec, cons_remain_sec = get_remain_time(runtime_sec, pros_ts), get_remain_time(runtime_sec, cons_ts)
         active_timestamp = state.get(f"{turn}_timestamp", []); is_timer_running = is_running(active_timestamp)
         response.update({'type': 'free_debate', 'turn': turn, 'pros_runtime': runtime_sec, 'cons_runtime': runtime_sec, 'pros_remain_sec': pros_remain_sec, 'cons_remain_sec': cons_remain_sec, 'pros_time_str': formalize(pros_remain_sec), 'cons_time_str': formalize(cons_remain_sec), 'turn_remain_sec': turn_remain_sec, 'turn_time_str': formalize(turn_remain_sec), 'is_running': is_timer_running, 'is_finished': pros_remain_sec == 0 and cons_remain_sec == 0})
     else: 

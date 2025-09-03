@@ -168,3 +168,110 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .modal-content .date-range { display: flex; align-items: center; gap: 10px; }
 .modal-content button[type="submit"] { background-color: #4A5568; color: white; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
 .close-btn { background: none; border: none; font-size: 24px; cursor: pointer; position: absolute; top: 10px; right: 15px; color: #888; }
+
+/* --- 웹 권한 관리 페이지 스타일 --- */
+.access-management-container {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: 100%;
+}
+.permission-panel {
+    background-color: #f4f7f9;
+    padding: 30px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+.permission-panel h2 {
+    margin-bottom: 20px;
+    text-align: center;
+}
+#permission-table-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+#permission-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#permission-table th, #permission-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 12px;
+    text-align: center;
+}
+#permission-table th {
+    background-color: #e2e8f0;
+    position: sticky;
+    top: 0;
+}
+#permission-table td:first-child {
+    font-weight: 600;
+    text-align: left;
+    padding-left: 20px;
+    background-color: #f8fafc;
+}
+#permission-table tr:hover {
+    background-color: #f9f9f9;
+}
+#permission-table input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+.panel-footer {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+.modal-content.large {
+    width: 800px;
+}
+#user-list-container {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+#user-list {
+    list-style: none;
+    padding: 0;
+}
+#user-list li {
+    display: flex;
+    align-items: center;
+    padding: 15px;
+    border-bottom: 1px solid #eee;
+}
+#user-list li:last-child {
+    border-bottom: none;
+}
+#user-list .user-name {
+    font-weight: 600;
+    width: 120px;
+}
+#user-list .user-info-item {
+    margin: 0 15px;
+    color: #555;
+    width: 150px;
+}
+.delete-user-btn {
+    margin-left: auto;
+    background-color: #E53E3E;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.delete-user-btn:hover {
+    background-color: #c53030;
+}
+.delete-user-btn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}

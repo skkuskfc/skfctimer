@@ -11,18 +11,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.querySelectorAll('.menu-item').forEach(item => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
             document.querySelectorAll('.menu-item').forEach(btn => btn.classList.remove('active'));
-            item.classList.add('active');
-            mainTitle.textContent = item.textContent;
-            loadContentFor(item);
+            e.currentTarget.classList.add('active');
+            mainTitle.textContent = e.currentTarget.textContent;
+            loadContentFor(e.currentTarget);
         });
     });
 
     function loadContentFor(item) {
         if (appInterval) clearInterval(appInterval);
         if (qrInterval) clearInterval(qrInterval);
-
         contentArea.innerHTML = '';
         sessionStorage.removeItem('current_mode');
 
@@ -33,30 +32,22 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('load-roster-btn').addEventListener('click', initializeAttendanceWithRoster);
             document.getElementById('set-cutoff-time-btn').addEventListener('click', setCutoffTime);
             fetch('/start_attendance', { method: 'POST' });
-
             const qrImg = document.getElementById('qr-code-img');
-            const updateQRCode = () => {
-                if (qrImg) qrImg.src = `/qrcode?t=${new Date().getTime()}`;
-            };
+            const updateQRCode = () => { if (qrImg) qrImg.src = `/qrcode?t=${new Date().getTime()}`; };
             updateQRCode();
             qrInterval = setInterval(updateQRCode, 10000);
-
-            fetchTodaysAttendance(); // 최초 로드
-            appInterval = setInterval(fetchTodaysAttendance, 3000); // 3초마다 실시간 업데이트
-        
+            fetchTodaysAttendance();
+            appInterval = setInterval(fetchTodaysAttendance, 3000);
         } else if (contentType === 'history') {
             contentArea.innerHTML = getHistoryHTML();
             const datePicker = document.getElementById('history-date-picker');
             datePicker.value = new Date().toISOString().split('T')[0];
             fetchHistory(datePicker.value);
             datePicker.addEventListener('change', (e) => fetchHistory(e.target.value));
-
             document.getElementById('reset-history-btn').addEventListener('click', () => {
                 const selectedDate = datePicker.value;
                 if (!selectedDate) { alert('날짜를 먼저 선택해주세요.'); return; }
-                if (confirm(`${selectedDate}의 출석 기록을 정말로 초기화하시겠습니까?`)) {
-                    resetHistory(selectedDate);
-                }
+                if (confirm(`${selectedDate}의 출석 기록을 정말로 초기화하시겠습니까?`)) resetHistory(selectedDate);
             });
             document.getElementById('export-excel-btn').addEventListener('click', () => {
                 const selectedDate = datePicker.value;
@@ -66,24 +57,25 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (contentType === 'member-roster') {
             contentArea.innerHTML = getMemberRosterHTML();
             initializeRosterPage();
+        } else if (contentType === 'access-management') {
+            contentArea.innerHTML = getAccessManagementHTML();
+            initializeAccessManagementPage();
         } else if (['ceda-timer', 'free-timer', 'general-timer'].includes(contentType)) {
             let startEndpoint = '';
             if (contentType === 'ceda-timer') startEndpoint = '/start_ceda_timer';
             else if (contentType === 'free-timer') startEndpoint = '/start_free_timer';
             else if (contentType === 'general-timer') startEndpoint = '/start_general_timer';
-            
             contentArea.innerHTML = getTimerHTML();
-            fetch(startEndpoint, { method: 'POST' })
-                .then(() => {
-                    fetchStatus();
-                    appInterval = setInterval(fetchStatus, 500);
-                });
+            fetch(startEndpoint, { method: 'POST' }).then(() => {
+                fetchStatus();
+                appInterval = setInterval(fetchStatus, 500);
+            });
         } else {
             contentArea.innerHTML = `<p style="padding: 20px;">${item.textContent} 콘텐츠가 여기에 표시됩니다.</p>`;
         }
     }
     
-    // --- 출석 관리 (Attendance) ---
+    // --- 출석 관리 ---
     function getAttendanceHTML() {
         const today = new Date();
         const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -113,23 +105,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function setCutoffTime() {
         const cutoffTime = document.getElementById('cutoff-time-input').value;
-        if (!cutoffTime) {
-            alert('시간을 선택해주세요.');
-            return;
-        }
+        if (!cutoffTime) { alert('시간을 선택해주세요.'); return; }
         const today_str = new Date().toISOString().split('T')[0];
         try {
-            const response = await fetch('/api/set_cutoff_time', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date: today_str, cutoff_time: cutoffTime })
-            });
-            if (!response.ok) throw new Error('시간 설정 실패');
+            await fetch('/api/set_cutoff_time', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: today_str, cutoff_time: cutoffTime }) });
             alert(`출석 인정 시간이 ${cutoffTime}으로 설정되었습니다.`);
-        } catch (error) {
-            console.error("출석 시간 설정 중 오류:", error);
-            alert('시간 설정에 실패했습니다.');
-        }
+        } catch (error) { alert('시간 설정에 실패했습니다.'); }
     }
 
     async function initializeAttendanceWithRoster() {
@@ -137,15 +118,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/api/initialize_attendance_with_roster', { method: 'POST' });
             const data = await response.json();
-            if (!response.ok) {
-                alert(data.error || '명단 초기화 실패');
-                return;
-            }
+            if (!response.ok) { alert(data.error || '명단 초기화 실패'); return; }
             displayAttendanceList(data.attendees);
-        } catch (error) {
-            console.error("출석부 초기화 중 오류:", error);
-            alert('출석부를 초기화하는 중 오류가 발생했습니다.');
-        }
+        } catch (error) { alert('출석부를 초기화하는 중 오류가 발생했습니다.'); }
     }
     
     async function fetchTodaysAttendance() {
@@ -154,27 +129,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (data.settings && data.settings.cutoff_time) {
                 const timeInput = document.getElementById('cutoff-time-input');
-                if (timeInput) {
-                    timeInput.value = data.settings.cutoff_time;
-                }
+                if (timeInput) timeInput.value = data.settings.cutoff_time;
             }
             displayAttendanceList(data.attendees);
-        } catch (error) {
-            console.error("오늘 출석 현황 로딩 중 오류:", error);
-        }
+        } catch (error) { console.error("오늘 출석 현황 로딩 중 오류:", error); }
     }
     
-    // MODIFIED: displayAttendanceList to remove timestamp and change summary format
     function displayAttendanceList(attendees) {
         const listElement = document.getElementById('attendee-list');
         const totalElement = document.getElementById('attendee-total');
         if (!listElement || !totalElement) return;
 
-        const statusIcons = {
-            '출석': '<span class="status-icon present">출석</span>',
-            '결석': '<span class="status-icon absent">결석</span>',
-            '지각': '<span class="status-icon late">지각</span>'
-        };
+        const statusIcons = { '출석': '<span class="status-icon present">출석</span>', '결석': '<span class="status-icon absent">결석</span>', '지각': '<span class="status-icon late">지각</span>' };
 
         if (!attendees || attendees.length === 0) {
             listElement.innerHTML = `<li>'현 기수 불러오기' 버튼을 눌러 출석부를 시작하세요.</li>`;
@@ -184,9 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <li>
                     <span class="name">${member.name}</span>
                     <span class="type">${member.type}</span>
-                    <div class="attendance-info">
-                        ${statusIcons[member.status] || ''}
-                    </div>
+                    <div class="attendance-info">${statusIcons[member.status] || ''}</div>
                 </li>
             `).join('');
             const presentCount = attendees.filter(m => m.status === '출석').length;
@@ -196,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // --- 출석 기록 (History) ---
+    // --- 출석 기록 ---
     function getHistoryHTML() {
         return `
             <div class="history-container">
@@ -214,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
     }
 
-    // NOTE: fetchHistory still shows timestamp as requested
     async function fetchHistory(date) {
         const listElement = document.getElementById('history-attendee-list');
         const totalElement = document.getElementById('history-total');
@@ -291,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 부원 명단 관리 (Member Roster) ---
+    // --- 부원 명단 관리 ---
     function getMemberRosterHTML() {
         return `
             <div class="roster-container">
@@ -445,7 +408,125 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(`${cohortId} 명단이 저장되었습니다.`);
     }
 
-    // --- 타이머 관련 (변경 없음) ---
+    // --- 웹 권한 관리 기능 ---
+    function getAccessManagementHTML() {
+        return `
+            <div class="access-management-container">
+                <div class="permission-panel">
+                    <h2>구분별 기능 접근 권한 설정</h2>
+                    <div id="permission-table-container"></div>
+                    <div class="panel-footer">
+                        <button id="manage-users-btn" class="action-btn">전체 계정 관리</button>
+                        <button id="save-permissions-btn" class="action-btn">권한 저장</button>
+                    </div>
+                </div>
+                <div id="user-management-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content large">
+                        <span id="close-user-modal" class="close-btn">&times;</span>
+                        <h2>전체 계정 관리</h2>
+                        <div id="user-list-container"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async function initializeAccessManagementPage() {
+        document.getElementById('manage-users-btn').addEventListener('click', openUserManagementModal);
+        document.getElementById('save-permissions-btn').addEventListener('click', savePermissions);
+        await renderPermissionTable();
+    }
+
+    async function renderPermissionTable() {
+        const container = document.getElementById('permission-table-container');
+        container.innerHTML = '<p>권한 정보를 불러오는 중...</p>';
+        try {
+            const response = await fetch('/api/access_data');
+            if (!response.ok) throw new Error('데이터 로딩 실패');
+            const data = await response.json();
+            const { member_types, features, permissions } = data;
+
+            let tableHTML = '<table id="permission-table"><thead><tr><th>구분</th>';
+            Object.values(features).forEach(name => tableHTML += `<th>${name}</th>`);
+            tableHTML += '</tr></thead><tbody>';
+
+            member_types.forEach(type => {
+                tableHTML += `<tr><td>${type}</td>`;
+                Object.keys(features).forEach(f_id => {
+                    const isChecked = permissions[type] && permissions[type].includes(f_id);
+                    tableHTML += `<td><input type="checkbox" data-type="${type}" data-feature="${f_id}" ${isChecked ? 'checked' : ''}></td>`;
+                });
+                tableHTML += '</tr>';
+            });
+            tableHTML += '</tbody></table>';
+            container.innerHTML = tableHTML;
+        } catch (error) {
+            console.error('권한 정보 로딩 실패:', error);
+            container.innerHTML = '<p>권한 정보를 불러오는 데 실패했습니다.</p>';
+        }
+    }
+
+    async function savePermissions() {
+        const newPermissions = {};
+        document.querySelectorAll('#permission-table input[type="checkbox"]').forEach(checkbox => {
+            const type = checkbox.dataset.type;
+            const feature = checkbox.dataset.feature;
+            if (!newPermissions[type]) newPermissions[type] = [];
+            if (checkbox.checked) newPermissions[type].push(feature);
+        });
+        try {
+            await fetch('/api/permissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPermissions) });
+            alert('권한이 성공적으로 저장되었습니다. 변경된 권한은 해당 사용자가 다시 로그인할 때 적용됩니다.');
+        } catch (error) {
+            alert('권한 저장에 실패했습니다.');
+        }
+    }
+
+    async function openUserManagementModal() {
+        const modal = document.getElementById('user-management-modal');
+        modal.style.display = 'flex';
+        document.getElementById('close-user-modal').addEventListener('click', () => modal.style.display = 'none');
+        const container = document.getElementById('user-list-container');
+        container.innerHTML = '<p>계정 목록을 불러오는 중...</p>';
+        try {
+            const response = await fetch('/api/users');
+            if (!response.ok) throw new Error('계정 로딩 실패');
+            const users = await response.json();
+            let listHTML = '<ul id="user-list">';
+            users.forEach(user => {
+                listHTML += `<li>
+                    <span class="user-name">${user.name}</span>
+                    <span class="user-info-item">구분: ${user.member_type}</span>
+                    <span class="user-info-item">아이디: ${user.id}</span>
+                    <span class="user-info-item">기수: ${user.cohort}</span>
+                    <button class="delete-user-btn" data-userid="${user.id}" ${user.member_type === '회장' ? 'disabled' : ''}>탈퇴</button>
+                </li>`;
+            });
+            listHTML += '</ul>';
+            container.innerHTML = listHTML;
+            document.querySelectorAll('.delete-user-btn').forEach(btn => btn.addEventListener('click', handleDeleteUser));
+        } catch (error) {
+            container.innerHTML = '<p>계정 목록을 불러오는 데 실패했습니다.</p>';
+        }
+    }
+
+    async function handleDeleteUser(event) {
+        const userId = event.target.dataset.userid;
+        const userName = event.target.closest('li').querySelector('.user-name').textContent;
+        if (confirm(`'${userName}'(${userId}) 계정을 정말로 탈퇴시키겠습니까?`)) {
+            try {
+                const response = await fetch('/api/delete_user', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId }) });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '삭제 실패');
+                alert('계정이 성공적으로 삭제되었습니다.');
+                openUserManagementModal();
+            } catch (error) {
+                alert(`계정 삭제에 실패했습니다: ${error.message}`);
+            }
+        }
+    }
+    
+    // --- 타이머 관련 함수들 ---
     async function fetchStatus() {
         try {
             const response = await fetch('/status');
