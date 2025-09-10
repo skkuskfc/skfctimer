@@ -545,7 +545,22 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateUI(data) {
         const timerView = document.getElementById('timer-view-container');
         if (!timerView) return;
+
         updateTimelineUI(data);
+        const deliberationControls = document.getElementById('deliberation-controls');
+
+        if (data.is_in_deliberation) {
+            timerView.className = 'ceda-timer-view sequence-mode deliberation-mode';
+            const view = document.getElementById('sequence-timer-display');
+            view.querySelector('#timer-title').textContent = data.step_name;
+            view.querySelector('#timer-time').textContent = data.deliberation_time_str;
+            if (deliberationControls) deliberationControls.style.display = 'none';
+            timerView.classList.add('running'); 
+            return; 
+        } else {
+             timerView.classList.remove('deliberation-mode');
+        }
+
         const customInputArea = document.getElementById('custom-time-input-area');
         if (customInputArea) {
             customInputArea.style.display = (data.mode === 'general' && data.step_name === '직접 입력') ? 'flex' : 'none';
@@ -556,6 +571,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (data.type === 'free_debate') {
             timerView.className = 'ceda-timer-view free-debate-mode';
             updateFreeDebateUI(data);
+        }
+        
+        if (deliberationControls) {
+            if (data.show_deliberation_controls) {
+                deliberationControls.style.display = 'flex';
+                const circles = deliberationControls.querySelectorAll('.deliberation-circle');
+                const remainingMins = Math.floor(data.total_deliberation_remain_sec / 60);
+                circles[0].classList.toggle('used', remainingMins < 1);
+                circles[1].classList.toggle('used', remainingMins < 2);
+            } else {
+                deliberationControls.style.display = 'none';
+            }
         }
         timerView.classList.toggle('running', data.is_running);
         timerView.classList.toggle('stopped', !data.is_running);
@@ -608,6 +635,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="timeline-panel"><div id="timeline-list" class="timeline-list"></div></div>
                 <div class="timer-panel">
                     <button id="fullscreen-btn">전체화면</button>
+                    <div id="deliberation-controls" style="display: none;">
+                        <div class="deliberation-circles">
+                            <div class="deliberation-circle" data-value="1"></div>
+                            <div class="deliberation-circle" data-value="2"></div>
+                        </div>
+                        <button id="deliberation-select-btn">숙의시간</button>
+                    </div>
                     <div id="sequence-timer-display">
                         <div class="timer-display-area">
                             <svg class="timer-svg" viewBox="0 0 120 120"><circle class="timer-progress" cx="60" cy="60" r="54" /></svg>
@@ -632,12 +666,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     contentArea.addEventListener('click', (e) => {
         const target = e.target;
+        
+        const deliberationControls = target.closest('#deliberation-controls');
+        if (deliberationControls) {
+            const circle = target.closest('.deliberation-circle:not(.used)');
+            if (circle) {
+                const circles = deliberationControls.querySelectorAll('.deliberation-circle');
+                const value = parseInt(circle.dataset.value, 10);
+                circles.forEach(c => c.classList.remove('selected'));
+                if (value >= 1) circles[0].classList.add('selected');
+                if (value >= 2 && !circles[1].classList.contains('used')) {
+                    circles[1].classList.add('selected');
+                } else if (value >= 2) { // 2분 클릭했지만 1분만 남았을 경우
+                    circles[0].classList.add('selected'); 
+                }
+            }
+            if (target.id === 'deliberation-select-btn') {
+                const selectedCircles = deliberationControls.querySelectorAll('.deliberation-circle.selected');
+                const timeToUse = selectedCircles.length * 60;
+                if (timeToUse > 0) {
+                    fetch('/use_deliberation_time', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ seconds: timeToUse })
+                    }).then(res => res.json()).then(data => {
+                        if (data.error) alert(data.error);
+                        selectedCircles.forEach(c => c.classList.remove('selected'));
+                    });
+                }
+            }
+            return;
+        }
+
         if (target.id === 'set-custom-time-btn') {
             const minutes = document.getElementById('custom-minutes').value || 0;
             const seconds = document.getElementById('custom-seconds').value || 0;
             fetch('/set_custom_time', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ minutes, seconds }) });
             return;
         }
+
         const actionMap = {
             '.timeline-item': (el) => { const stepIndex = parseInt(el.dataset.stepIndex, 10); fetch('/set_step', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: stepIndex }) }); },
             '.debate-panel:not(.active)': () => fetch('/switch_turn', { method: 'POST' }),

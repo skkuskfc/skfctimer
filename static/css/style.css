@@ -91,7 +91,63 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .running #toggle-btn { width: 30px; border-left: 10px solid #F5EFE7; border-right: 10px solid #F5EFE7; height: 40px; }
 .stopped .debate-panel.active .panel-toggle-btn { width: 0; height: 0; border-top: 20px solid transparent; border-bottom: 20px solid transparent; border-left: 30px solid #F5EFE7; }
 .running .debate-panel.active .panel-toggle-btn { width: 30px; border-left: 10px solid #F5EFE7; border-right: 10px solid #F5EFE7; height: 40px; }
-#fullscreen-btn { position: absolute; top: 20px; right: 20px; font-size: 16px; font-weight: 600; color: #F5EFE7; background-color: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 20px; cursor: pointer; }
+#fullscreen-btn { position: absolute; top: 20px; right: 20px; font-size: 16px; font-weight: 600; color: #F5EFE7; background-color: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 20px; cursor: pointer; z-index: 10; }
+
+/* --- 타이머 숙의 시간 UI --- */
+.deliberation-controls {
+    position: absolute;
+    top: 20px;
+    right: 180px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background-color: rgba(255, 255, 255, 0.1);
+    padding: 8px 12px;
+    border-radius: 20px;
+    z-index: 10;
+}
+.deliberation-circles {
+    display: flex;
+    gap: 8px;
+}
+.deliberation-circle {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: #F5EFE7;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+.deliberation-circle.used {
+    background-color: #888;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+.deliberation-circle.selected {
+    border-color: #3498db;
+    transform: scale(1.1);
+    box-shadow: 0 0 8px #3498db;
+}
+#deliberation-select-btn {
+    background: #F5EFE7;
+    color: #27384E;
+    border: none;
+    border-radius: 15px;
+    padding: 6px 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+#deliberation-select-btn:disabled {
+    background: #aaa;
+    cursor: not-allowed;
+}
+.deliberation-mode #timer-title::before {
+    content: "[숙의 시간] ";
+    font-weight: 700;
+    color: #e74c3c;
+}
+
 
 /* --- 전체화면 스타일 수정 --- */
 .ceda-timer-view:fullscreen { padding: 2vw; }
@@ -113,7 +169,6 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .attendee-list-panel { flex: 1; overflow: hidden; }
 .attendee-list-panel h2 { font-size: 24px; font-weight: 600; color: #333; flex-shrink: 0; }
 #attendee-list, #history-attendee-list { list-style: none; width: 100%; padding: 0; overflow-y: auto; font-size: 22px; flex-grow: 1; }
-/* MODIFIED: List item style updated for flexbox layout */
 #attendee-list li, #history-attendee-list li { display: flex; align-items: center; padding: 15px 20px; border-bottom: 1px solid #e0e0e0; gap: 20px; }
 #attendee-list li:last-child, #history-attendee-list li:last-child { border-bottom: none; }
 .name { font-weight: 600; width: 120px; flex-shrink: 0; }
@@ -130,20 +185,16 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .export-btn:hover { background-color: #256934; }
 #history-results { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
 .total-count { width: 100%; padding: 15px 20px; border-top: 2px solid #e0e0e0; font-size: 20px; font-weight: 700; text-align: center; color: #333; flex-shrink: 0; }
-/* MODIFIED: Roster header now uses flexbox correctly */
 .roster-header { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;}
-/* MODIFIED: New styles for attendance controls and info block */
 .attendance-controls { display: flex; align-items: center; gap: 10px; }
 .attendance-controls label { font-weight: 600; font-size: 16px; white-space: nowrap; }
 .attendance-controls input[type="time"] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
 .attendance-info { margin-left: auto; display: flex; align-items: center; gap: 20px; }
 .timestamp { font-size: 18px; color: #555; width: 80px; text-align: right; }
-/* MODIFIED: Status icon style updated to work with flexbox (no absolute positioning) */
 .status-icon { font-size: 14px; font-weight: bold; color: white; padding: 4px 12px; border-radius: 12px; width: 65px; text-align: center; }
 .status-icon.present { background-color: #38A169; } /* 초록 */
 .status-icon.absent { background-color: #E53E3E; } /* 빨강 */
 .status-icon.late { background-color: #D69E2E; } /* 노랑 */
-/* MODIFIED: Status dropdown style updated to work with flexbox (no absolute positioning) */
 .status-dropdown { padding: 5px 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 15px; background-color: #fff; }
 
 /* --- 부원 명단 관리 --- */
