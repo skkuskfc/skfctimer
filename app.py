@@ -464,7 +464,6 @@ def delete_user():
 def start_ceda_timer():
     session['mode'] = 'ceda'; session['step'] = 0
     session['deliberation_remain_sec'] = 120 
-    session.pop('deliberation_state', None)
     setup_step()
     return jsonify({'status': 'CEDA timer initialized'})
 
@@ -580,46 +579,17 @@ def use_deliberation_time():
     
     remaining = session.get('deliberation_remain_sec', 0)
     if seconds_to_use > remaining: return jsonify({'error': '숙의 시간이 부족합니다.'}), 400
+    
     session['deliberation_remain_sec'] = remaining - seconds_to_use
-    
-    main_timer_state = session.get('timer_state', {})
-    main_timestamp = main_timer_state.get('timestamp', [])
-    was_running = is_running(main_timestamp)
-    if was_running: main_timestamp.append(time.time())
-    
-    deliberation_state = {
-        'is_active': True, 'runtime': seconds_to_use, 'timestamp': [time.time()],
-        'original_timer_state': main_timer_state, 'was_running': was_running
-    }
-    session['deliberation_state'] = deliberation_state
-    session['timer_state'] = {}
-    return jsonify({'status': 'success'})
-
+    return jsonify({'status': 'success', 'remaining_sec': session['deliberation_remain_sec']})
 
 @app.route('/status')
 def status():
     if not check_current_timer_permission(): return jsonify({'active': False, 'error': '접근 권한이 없습니다.'}), 403
     
-    deliberation_state = session.get('deliberation_state', {})
-    if deliberation_state.get('is_active'):
-        del_runtime = deliberation_state.get('runtime', 0); del_timestamp = deliberation_state.get('timestamp', [])
-        del_remain_sec = get_remain_time(del_runtime, del_timestamp)
-        if del_remain_sec > 0:
-            return jsonify({
-                'active': True, 'is_in_deliberation': True,
-                'deliberation_remain_sec': del_remain_sec, 'deliberation_time_str': formalize(del_remain_sec),
-                'timeline': get_current_data(), 'step': session.get('step', 0),
-                'step_name': get_current_data()['names'][session.get('step', 0)]
-            })
-        else:
-            original_state = deliberation_state.get('original_timer_state', {})
-            original_timestamp = original_state.get('timestamp', [])
-            if deliberation_state.get('was_running'): original_timestamp.append(time.time())
-            session['timer_state'] = original_state
-            session.pop('deliberation_state', None)
-
     mode = session.get('mode'); data = get_current_data()
     if not data: return jsonify({'active': False})
+    
     step = session.get('step', 0); state = session.get('timer_state', {}); step_type = data['pc'][step]
     response = {'active': True, 'mode': mode, 'step': step, 'step_name': data['names'][step], 'timeline': data}
 
@@ -652,3 +622,4 @@ def setup_step():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
+
