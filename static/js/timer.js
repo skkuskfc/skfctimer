@@ -23,7 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (appInterval) clearInterval(appInterval);
         if (qrInterval) clearInterval(qrInterval);
         contentArea.innerHTML = '';
-        sessionStorage.removeItem('current_mode');
+        const currentMode = item.dataset.content.replace('-timer', '');
+        sessionStorage.setItem('current_mode', currentMode);
 
         const contentType = item.dataset.content;
         
@@ -547,15 +548,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!timerView) return;
 
         updateTimelineUI(data);
-        const deliberationControls = document.getElementById('deliberation-controls');
-
+        
+        // 숙의 시간 모드 UI 처리
         if (data.is_in_deliberation) {
             timerView.className = 'ceda-timer-view sequence-mode deliberation-mode';
             const view = document.getElementById('sequence-timer-display');
             view.querySelector('#timer-title').textContent = data.step_name;
             view.querySelector('#timer-time').textContent = data.deliberation_time_str;
-            if (deliberationControls) deliberationControls.style.display = 'none';
-            timerView.classList.add('running'); 
+            document.getElementById('deliberation-controls').style.display = 'none'; // 숙의 중에는 컨트롤 숨김
+            timerView.classList.toggle('running', data.is_running);
+            timerView.classList.toggle('stopped', !data.is_running);
             return; 
         } else {
              timerView.classList.remove('deliberation-mode');
@@ -573,13 +575,24 @@ document.addEventListener('DOMContentLoaded', () => {
             updateFreeDebateUI(data);
         }
         
+        // 숙의 시간 컨트롤러 UI 업데이트
+        const deliberationControls = document.getElementById('deliberation-controls');
         if (deliberationControls) {
             if (data.show_deliberation_controls) {
                 deliberationControls.style.display = 'flex';
+                // 현재 어떤 팀이 사용할 수 있는지 데이터 속성으로 저장
+                deliberationControls.dataset.team = data.deliberation_chance_for;
+                
+                const teamRemainSec = data.deliberation_remain[data.deliberation_chance_for];
+                const remainingMins = Math.floor(teamRemainSec / 60);
+                
                 const circles = deliberationControls.querySelectorAll('.deliberation-circle');
-                const remainingMins = Math.floor(data.total_deliberation_remain_sec / 60);
+                circles.forEach(c => c.classList.remove('used', 'selected'));
+                
                 circles[0].classList.toggle('used', remainingMins < 1);
                 circles[1].classList.toggle('used', remainingMins < 2);
+                
+                document.getElementById('deliberation-select-btn').disabled = false;
             } else {
                 deliberationControls.style.display = 'none';
             }
@@ -640,7 +653,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="deliberation-circle" data-value="1"></div>
                             <div class="deliberation-circle" data-value="2"></div>
                         </div>
-                        <button id="deliberation-select-btn">숙의시간</button>
+                        <button id="deliberation-select-btn">숙의시간 사용</button>
                     </div>
                     <div id="sequence-timer-display">
                         <div class="timer-display-area">
@@ -673,22 +686,36 @@ document.addEventListener('DOMContentLoaded', () => {
             if (circle) {
                 const circles = deliberationControls.querySelectorAll('.deliberation-circle');
                 const value = parseInt(circle.dataset.value, 10);
+                
+                // 현재 선택 상태 확인
+                const isSelected = circle.classList.contains('selected');
+                const currentlySelectedCount = deliberationControls.querySelectorAll('.deliberation-circle.selected').length;
+
                 circles.forEach(c => c.classList.remove('selected'));
-                if (value >= 1) circles[0].classList.add('selected');
-                if (value >= 2 && !circles[1].classList.contains('used')) {
-                    circles[1].classList.add('selected');
-                } else if (value >= 2) { // 2분 클릭했지만 1분만 남았을 경우
-                    circles[0].classList.add('selected'); 
+
+                if (isSelected && currentlySelectedCount === value) {
+                    // 같은 버튼을 다시 눌러 선택 취소 (1분만 선택되게)
+                    if (value === 2) {
+                         circles[0].classList.add('selected');
+                    }
+                } else {
+                    // 새로 선택
+                    if (value >= 1) circles[0].classList.add('selected');
+                    if (value >= 2 && !circles[1].classList.contains('used')) {
+                        circles[1].classList.add('selected');
+                    }
                 }
             }
             if (target.id === 'deliberation-select-btn') {
-                const selectedCircles = deliberationControls.querySelectorAll('.deliberation-circle.selected');
+                const selectedCircles = deliberationControls.querySelectorAll('.deliberation-circle.selected:not(.used)');
                 const timeToUse = selectedCircles.length * 60;
-                if (timeToUse > 0) {
+                const teamToUse = deliberationControls.dataset.team; // 어떤 팀이 사용할지 가져옴
+
+                if (timeToUse > 0 && teamToUse) {
                     fetch('/use_deliberation_time', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ seconds: timeToUse })
+                        body: JSON.stringify({ seconds: timeToUse, team: teamToUse })
                     }).then(res => res.json()).then(data => {
                         if (data.error) alert(data.error);
                         selectedCircles.forEach(c => c.classList.remove('selected'));
@@ -729,13 +756,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.matches('input, select')) return;
         const mode = sessionStorage.getItem('current_mode');
         if (!mode) return;
+        
+        const isTimerVisible = document.getElementById('timer-view-container');
+        if (!isTimerVisible) return;
+
         const actionMap = {
             ' ': '/toggle_timer', 'ArrowUp': '/previous_step', 'ArrowDown': '/next_step'
         };
         const timeAdjustMap = {
             'ArrowLeft': -10, 'ArrowRight': 10
         }
-        if (actionMap[e.key]) { 
+
+        if(mode === 'free_debate' && e.key === 'Tab') {
+             e.preventDefault();
+             fetch('/switch_turn', { method: 'POST' });
+        } else if (actionMap[e.key]) { 
             e.preventDefault();
             fetch(actionMap[e.key], { method: 'POST' });
         } else if (timeAdjustMap[e.key]) {

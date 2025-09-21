@@ -8,6 +8,7 @@ from functools import wraps
 from flask import Flask, render_template, session, jsonify, request, url_for, send_file, redirect, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
+from filelock import FileLock # 파일 잠금을 위한 라이브러리 추가
 
 app = Flask(__name__)
 app.secret_key = 'skfc-login-and-all-features'
@@ -19,6 +20,8 @@ if not os.path.exists(DISK_PATH):
 
 USED_TOKENS = set()
 ATTENDANCE_FILE = os.path.join(DISK_PATH, 'attendance_log.json')
+# 잠금 파일을 위한 경로 추가
+ATTENDANCE_FILE_LOCK = os.path.join(DISK_PATH, 'attendance_log.json.lock')
 USERS_FILE = os.path.join(DISK_PATH, 'users.json')
 COHORTS_FILE = os.path.join(DISK_PATH, 'cohorts.json')
 ROSTER_FILE = os.path.join(DISK_PATH, 'roster.json')
@@ -34,7 +37,13 @@ FEATURES = {
 }
 
 # --- 타이머 데이터 ---
-CEDA_DATA = { 'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'], 'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2], 'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0] }
+CEDA_DATA = {
+    'names': ['찬성1 입론', '반대2 교차조사', '반대1 입론', '찬성1 교차조사', '찬성2 입론', '반대1 교차조사', '반대2 입론', '찬성2 교차조사', '자유토론', '반대 마무리발언', '찬성 마무리발언'],
+    'runtimes': [4, 3, 4, 3, 4, 3, 4, 3, 8, 2, 2],
+    'pc': [0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0],
+    # 0: 사용불가, 1: 찬성팀, 2: 반대팀
+    'deliberation_chance': [0, 2, 0, 1, 0, 2, 0, 1, 2, 2, 1] 
+}
 FREE_DEBATE_DATA = { 'names': ['찬성 기조발언', '반대 기조발언', '자유토론', '반대 마무리 발언', '찬성 마무리 발언'], 'runtimes': [1, 1, 11, 1, 1], 'pc': [0, 1, 2, 1, 0] }
 GENERAL_TIMER_DATA = { 'names': [f'{i}분 타이머' for i in range(1, 11)] + ['직접 입력'], 'runtimes': [i for i in range(1, 11)] + [0], 'pc': [0] * 11 }
 
@@ -224,39 +233,47 @@ def submit_name():
     check_in_time = datetime.now(KST)
 
     if name and member_type:
-        today_str = check_in_time.strftime('%Y-%m-%d')
-        log = load_json_file(ATTENDANCE_FILE)
-        
-        today_log_entry = log.get(today_str)
-        if isinstance(today_log_entry, list):
-            attendees, settings = today_log_entry, {'cutoff_time': '18:00'}
-        elif isinstance(today_log_entry, dict):
-            attendees, settings = today_log_entry.get('attendees', []), today_log_entry.get('settings', {'cutoff_time': '18:00'})
-        else:
-            attendees, settings = [], {'cutoff_time': '18:00'}
+        lock = FileLock(ATTENDANCE_FILE_LOCK, timeout=5) # 잠금 객체 생성, 5초간 대기
+        try:
+            with lock: # 파일 잠금 시작
+                today_str = check_in_time.strftime('%Y--%m--%d')
+                log = load_json_file(ATTENDANCE_FILE)
+                
+                today_log_entry = log.get(today_str)
+                if isinstance(today_log_entry, list):
+                    attendees, settings = today_log_entry, {'cutoff_time': '18:00'}
+                elif isinstance(today_log_entry, dict):
+                    attendees, settings = today_log_entry.get('attendees', []), today_log_entry.get('settings', {'cutoff_time': '18:00'})
+                else:
+                    attendees, settings = [], {'cutoff_time': '18:00'}
 
-        cutoff_time_str = settings.get('cutoff_time', '18:00')
-        
-        naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
-        effective_cutoff = naive_cutoff + timedelta(seconds=59)
-        cutoff_datetime = effective_cutoff.replace(tzinfo=KST)
+                cutoff_time_str = settings.get('cutoff_time', '18:00')
+                
+                naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y--%m--%d %H:%M')
+                effective_cutoff = naive_cutoff + timedelta(seconds=59)
+                cutoff_datetime = effective_cutoff.replace(tzinfo=KST)
 
-        status = '출석' if check_in_time <= cutoff_datetime else '지각'
-        timestamp_str = check_in_time.strftime('%H:%M:%S')
+                status = '출석' if check_in_time <= cutoff_datetime else '지각'
+                timestamp_str = check_in_time.strftime('%H:%M:%S')
 
-        member_found = False
-        for member in attendees:
-            if member['name'] == name:
-                member['status'] = status
-                member['timestamp'] = timestamp_str
-                member_found = True
-                break
+                member_found = False
+                for member in attendees:
+                    if member['name'] == name:
+                        member['status'] = status
+                        member['timestamp'] = timestamp_str
+                        member_found = True
+                        break
+                
+                if not member_found:
+                    attendees.append({'name': name, 'type': member_type, 'status': status, 'timestamp': timestamp_str})
+                
+                log[today_str] = {'settings': settings, 'attendees': attendees}
+                save_json_file(log, ATTENDANCE_FILE)
+                # 파일 잠금이 해제되기 전에 모든 작업을 완료
         
-        if not member_found:
-            attendees.append({'name': name, 'type': member_type, 'status': status, 'timestamp': timestamp_str})
-        
-        log[today_str] = {'settings': settings, 'attendees': attendees}
-        save_json_file(log, ATTENDANCE_FILE)
+        except TimeoutError:
+             return "<h1>서버가 현재 혼잡합니다. 잠시 후 다시 시도해주세요.</h1>", 503
+
         USED_TOKENS.add(token)
         session.pop('attendance_token', None)
         return "<h1>출석이 완료되었습니다.</h1><p>이 창을 닫아주세요.</p>"
@@ -462,8 +479,11 @@ def delete_user():
 @app.route('/start_ceda_timer', methods=['POST'])
 @permission_required('ceda-timer')
 def start_ceda_timer():
-    session['mode'] = 'ceda'; session['step'] = 0
-    session['deliberation_remain_sec'] = 120 
+    session['mode'] = 'ceda'
+    session['step'] = 0
+    # 팀별 숙의시간 120초(2분)로 초기화
+    session['deliberation_remain'] = {'pros': 120, 'cons': 120} 
+    session['is_in_deliberation'] = False
     setup_step()
     return jsonify({'status': 'CEDA timer initialized'})
 
@@ -570,49 +590,74 @@ def adjust_time():
     return jsonify({'status': 'time adjusted'})
 
 @app.route('/use_deliberation_time', methods=['POST'])
+@permission_required('ceda-timer')
 def use_deliberation_time():
-    if not check_current_timer_permission(): return jsonify({'error': '접근 권한이 없습니다.'}), 403
-    
     data = request.get_json()
     seconds_to_use = int(data.get('seconds', 0))
-    if seconds_to_use not in [60, 120]: return jsonify({'error': 'Invalid time'}), 400
+    team = data.get('team') # 'pros' 또는 'cons'
     
-    remaining = session.get('deliberation_remain_sec', 0)
-    if seconds_to_use > remaining: return jsonify({'error': '숙의 시간이 부족합니다.'}), 400
+    if team not in ['pros', 'cons'] or seconds_to_use not in [60, 120]:
+        return jsonify({'error': '잘못된 요청입니다.'}), 400
     
-    session['deliberation_remain_sec'] = remaining - seconds_to_use
-    return jsonify({'status': 'success', 'remaining_sec': session['deliberation_remain_sec']})
+    deliberation_remain = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
+    if seconds_to_use > deliberation_remain.get(team, 0):
+        return jsonify({'error': '숙의 시간이 부족합니다.'}), 400
+    
+    deliberation_remain[team] -= seconds_to_use
+    session['deliberation_remain'] = deliberation_remain
+    
+    # 숙의 시간 타이머 상태 설정
+    session['is_in_deliberation'] = True
+    session['deliberation_state'] = {
+        'team': team,
+        'runtime': seconds_to_use,
+        'timestamp': [time.time()] # 시작과 동시에 run
+    }
+    return jsonify({'status': 'success', 'remaining': session['deliberation_remain']})
 
 @app.route('/status')
 def status():
     if not check_current_timer_permission(): return jsonify({'active': False, 'error': '접근 권한이 없습니다.'}), 403
     
-    mode = session.get('mode'); data = get_current_data()
+    mode = session.get('mode')
+    data = get_current_data()
     if not data: return jsonify({'active': False})
     
-    step = session.get('step', 0); state = session.get('timer_state', {}); step_type = data['pc'][step]
-    response = {'active': True, 'mode': mode, 'step': step, 'step_name': data['names'][step], 'timeline': data}
+    step = session.get('step', 0)
+    state = session.get('timer_state', {})
+    
+    # 숙의 시간 모드인지 확인
+    if session.get('is_in_deliberation'):
+        delib_state = session.get('deliberation_state', {})
+        delib_remain_sec = get_remain_time(delib_state.get('runtime', 0), delib_state.get('timestamp', []))
+        
+        if delib_remain_sec <= 0:
+            session['is_in_deliberation'] = False # 숙의 시간 종료
+        else:
+            team_name = "찬성" if delib_state.get('team') == 'pros' else "반대"
+            return jsonify({
+                'active': True, 'mode': mode, 'step': step, 'timeline': data,
+                'is_in_deliberation': True,
+                'step_name': f'{team_name}',
+                'deliberation_time_str': formalize(delib_remain_sec),
+                'is_running': is_running(delib_state.get('timestamp', []))
+            })
 
+    step_type = data['pc'][step]
+    response = {'active': True, 'mode': mode, 'step': step, 'step_name': data['names'][step], 'timeline': data, 'is_in_deliberation': False}
+
+    # 현재 단계에서 숙의 시간 사용 가능한지 확인
     if mode == 'ceda':
-        deliberation_steps = [1, 3, 5, 7, 9, 10]
-        if step in deliberation_steps:
+        main_runtime = state.get('runtime', 0)
+        main_remain = get_remain_time(main_runtime, state.get('timestamp', []))
+        
+        chance_code = data['deliberation_chance'][step]
+        # 타이머가 시작되지 않았고, 숙의시간 사용 가능한 단계일 때
+        if main_runtime > 0 and main_remain == main_runtime and chance_code != 0:
             response['show_deliberation_controls'] = True
-            response['total_deliberation_remain_sec'] = session.get('deliberation_remain_sec', 0)
-
-    if step_type == 2:
-        turn_ts = state.get('turn_timestamp', []); turn_remain_sec = get_remain_time(120, turn_ts)
-        if turn_remain_sec <= 0 and is_running(turn_ts): state = perform_turn_switch(state); session['timer_state'] = state
-        runtime_sec = state.get('runtime', 0)
-        pros_ts, cons_ts = state.get('pros_timestamp', []), state.get('cons_timestamp', [])
-        turn = state.get('turn', 'pros'); pros_remain_sec, cons_remain_sec = get_remain_time(runtime_sec, pros_ts), get_remain_time(runtime_sec, cons_ts)
-        active_timestamp = state.get(f"{turn}_timestamp", []); is_timer_running = is_running(active_timestamp)
-        response.update({'type': 'free_debate', 'turn': turn, 'pros_runtime': runtime_sec, 'cons_runtime': runtime_sec, 'pros_remain_sec': pros_remain_sec, 'cons_remain_sec': cons_remain_sec, 'pros_time_str': formalize(pros_remain_sec), 'cons_time_str': formalize(cons_remain_sec), 'turn_remain_sec': turn_remain_sec, 'turn_time_str': formalize(turn_remain_sec), 'is_running': is_timer_running, 'is_finished': pros_remain_sec == 0 and cons_remain_sec == 0})
-    else: 
-        runtime_sec = state.get('runtime', 0); timestamp = state.get('timestamp', [])
-        remain_sec = get_remain_time(runtime_sec, timestamp)
-        response.update({'type': 'sequence', 'remain_sec': remain_sec, 'time_str': formalize(remain_sec), 'runtime': runtime_sec, 'is_running': is_running(timestamp), 'is_finished': remain_sec == 0})
-    return jsonify(response)
-
+            response['deliberation_chance_for'] = 'pros' if chance_code == 1 else 'cons'
+            response['deliberation_remain'] = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
+            
 def setup_step():
     data = get_current_data()
     if not data: return

@@ -97,7 +97,7 @@ body { display: flex; justify-content: center; align-items: center; height: 100v
 .deliberation-controls {
     position: absolute;
     top: 20px;
-    right: 180px;
+    left: 20px; /* right: 180px; 에서 변경 */
     display: flex;
     align-items: center;
     gap: 15px;
