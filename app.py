@@ -237,7 +237,7 @@ def submit_name():
         lock = FileLock(ATTENDANCE_FILE_LOCK, timeout=5) # 잠금 객체 생성, 5초간 대기
         try:
             with lock: # 파일 잠금 시작
-                today_str = check_in_time.strftime('%Y--%m--%d')
+                today_str = check_in_time.strftime('%Y-%m-%d')
                 log = load_json_file(ATTENDANCE_FILE)
                 
                 today_log_entry = log.get(today_str)
@@ -250,7 +250,7 @@ def submit_name():
 
                 cutoff_time_str = settings.get('cutoff_time', '18:00')
                 
-                naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y--%m--%d %H:%M')
+                naive_cutoff = datetime.strptime(f"{today_str} {cutoff_time_str}", '%Y-%m-%d %H:%M')
                 effective_cutoff = naive_cutoff + timedelta(seconds=59)
                 cutoff_datetime = effective_cutoff.replace(tzinfo=KST)
 
@@ -658,6 +658,7 @@ def status():
             response['show_deliberation_controls'] = True
             response['deliberation_chance_for'] = 'pros' if chance_code == 1 else 'cons'
             response['deliberation_remain'] = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
+    return jsonify(response)
 
 def setup_step():
     data = get_current_data()
@@ -668,4 +669,3 @@ def setup_step():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
-
