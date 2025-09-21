@@ -1,3 +1,4 @@
+#9월 21일 수정
 import time
 import io
 import qrcode
@@ -657,7 +658,7 @@ def status():
             response['show_deliberation_controls'] = True
             response['deliberation_chance_for'] = 'pros' if chance_code == 1 else 'cons'
             response['deliberation_remain'] = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
-            
+
 def setup_step():
     data = get_current_data()
     if not data: return
