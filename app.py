@@ -618,47 +618,95 @@ def use_deliberation_time():
 
 @app.route('/status')
 def status():
-    if not check_current_timer_permission(): return jsonify({'active': False, 'error': '접근 권한이 없습니다.'}), 403
-    
+    if not check_current_timer_permission():
+        return jsonify({'active': False, 'error': '접근 권한이 없습니다.'}), 403
+
     mode = session.get('mode')
     data = get_current_data()
-    if not data: return jsonify({'active': False})
-    
+    if not data:
+        return jsonify({'active': False})
+
     step = session.get('step', 0)
     state = session.get('timer_state', {})
-    
-    # 숙의 시간 모드인지 확인
+
+    # 1) 숙의 시간(별도 타이머) 진행 중이면 그 상태 우선 반환
     if session.get('is_in_deliberation'):
         delib_state = session.get('deliberation_state', {})
-        delib_remain_sec = get_remain_time(delib_state.get('runtime', 0), delib_state.get('timestamp', []))
-        
-        if delib_remain_sec <= 0:
-            session['is_in_deliberation'] = False # 숙의 시간 종료
+        rem = get_remain_time(delib_state.get('runtime', 0), delib_state.get('timestamp', []))
+        if rem <= 0:
+            session['is_in_deliberation'] = False
         else:
             team_name = "찬성" if delib_state.get('team') == 'pros' else "반대"
             return jsonify({
-                'active': True, 'mode': mode, 'step': step, 'timeline': data,
+                'active': True,
+                'mode': mode,
+                'step': step,
+                'timeline': data,
                 'is_in_deliberation': True,
                 'step_name': f'{team_name}',
-                'deliberation_time_str': formalize(delib_remain_sec),
+                'deliberation_time_str': formalize(rem),
                 'is_running': is_running(delib_state.get('timestamp', []))
             })
 
-    step_type = data['pc'][step]
-    response = {'active': True, 'mode': mode, 'step': step, 'step_name': data['names'][step], 'timeline': data, 'is_in_deliberation': False}
+    # 2) 일반 타이머 상태
+    step_type = data['pc'][step]  # 2 = 자유토론, 그 외 = 시퀀스
+    base = {
+        'active': True,
+        'mode': mode,
+        'step': step,
+        'step_name': data['names'][step],
+        'timeline': data,
+        'is_in_deliberation': False
+    }
 
-    # 현재 단계에서 숙의 시간 사용 가능한지 확인
-    if mode == 'ceda':
-        main_runtime = state.get('runtime', 0)
-        main_remain = get_remain_time(main_runtime, state.get('timestamp', []))
-        
-        chance_code = data['deliberation_chance'][step]
-        # 타이머가 시작되지 않았고, 숙의시간 사용 가능한 단계일 때
-        if main_runtime > 0 and main_remain == main_runtime and chance_code != 0:
-            response['show_deliberation_controls'] = True
-            response['deliberation_chance_for'] = 'pros' if chance_code == 1 else 'cons'
-            response['deliberation_remain'] = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
-    return jsonify(response)
+    if step_type == 2:
+        # 자유토론
+        runtime = int(state.get('runtime', 0))  # 팀별 총 배정시간(초)
+        pros_ts = state.get('pros_timestamp', [])
+        cons_ts = state.get('cons_timestamp', [])
+        turn_ts = state.get('turn_timestamp', [])  # 1회 발언(보통 120초)
+
+        pros_rem = get_remain_time(runtime, pros_ts)
+        cons_rem = get_remain_time(runtime, cons_ts)
+        turn_rem = get_remain_time(120, turn_ts)
+
+        base.update({
+            'type': 'free_debate',
+            'pros_runtime': runtime,
+            'cons_runtime': runtime,
+            'pros_remain_sec': pros_rem,
+            'cons_remain_sec': cons_rem,
+            'pros_time_str': formalize(pros_rem),
+            'cons_time_str': formalize(cons_rem),
+            'turn': state.get('turn', 'pros'),
+            'turn_remain_sec': turn_rem,
+            'turn_time_str': formalize(turn_rem),
+            'is_running': is_running(turn_ts)
+        })
+    else:
+        # 시퀀스(입론/교차/마무리 등)
+        runtime = int(state.get('runtime', 0))
+        ts = state.get('timestamp', [])
+        remain = get_remain_time(runtime, ts)
+
+        base.update({
+            'type': 'sequence',
+            'runtime': runtime,
+            'remain_sec': remain,
+            'time_str': formalize(remain),
+            'is_running': is_running(ts)
+        })
+
+        # CEDA에서 '숙의시간' 아이콘 표시는 메인 타이머가 아직 시작 전 & 해당 스텝 허용일 때만
+        if mode == 'ceda':
+            main_remain = get_remain_time(runtime, ts)
+            chance_code = data['deliberation_chance'][step]  # 0/1(pros)/2(cons)
+            if runtime > 0 and main_remain == runtime and chance_code != 0:
+                base['show_deliberation_controls'] = True
+                base['deliberation_chance_for'] = 'pros' if chance_code == 1 else 'cons'
+                base['deliberation_remain'] = session.get('deliberation_remain', {'pros': 0, 'cons': 0})
+
+    return jsonify(base)
 
 def setup_step():
     data = get_current_data()
